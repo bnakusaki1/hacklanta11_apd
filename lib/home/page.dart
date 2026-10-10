@@ -7,7 +7,6 @@ class HomePage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Home / Focus')),
       body: Center(
         child: ElevatedButton(
           onPressed: () => Navigator.of(context).push(

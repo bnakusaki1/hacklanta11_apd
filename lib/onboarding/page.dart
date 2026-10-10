@@ -13,7 +13,7 @@ class OnboardingPage extends StatelessWidget {
           onPressed: () => Navigator.of(context).pushReplacement(
             MaterialPageRoute<void>(builder: (_) => const HomePage()),
           ),
-          child: const Text('Continue to Home'),
+          child: const Text('Whereas disregard and contempt for human rights have resulted'),
         ),
       ),
     );
