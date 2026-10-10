@@ -1,8 +1,8 @@
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 class BackendConnectionStore {
-  static const _urlKey = 'ws://10.0.2.2:3000/transcribe';
-  static const _tokenKey = 'transcription_backed_access_token';
+  static const _urlKey = 'transcription_backend_url';
+  static const _tokenKey = 'transcription_backend_access_token';
   static const FlutterSecureStorage _storage = FlutterSecureStorage();
 
   static Future<String?> readUrl() => _storage.read(key: _urlKey);

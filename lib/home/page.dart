@@ -1,7 +1,12 @@
+import 'dart:async';
+import 'dart:typed_data';
+
+import 'package:adp/audio/audio_capture_service.dart';
 import 'package:adp/settings/page.dart';
 import 'package:adp/transcription/backend_connection_store.dart';
 import 'package:adp/transcription/backend_transcription_client.dart';
 import 'package:flutter/material.dart';
+import 'package:iconsax/iconsax.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -12,9 +17,15 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> {
   late final TranscriptionBackendClient _client;
-  bool _enabled = true;
-  bool _connecting = false;
-  String _connectionStatus = 'Not connected';
+  final AudioCaptureService _audioService = AudioCaptureService();
+  StreamSubscription<Uint8List>? _audioSubscription;
+
+  bool _isListening = false;
+  bool _isConnecting = false;
+  bool _isStopping = false;
+  int _audioChunksSent = 0;
+  int _audioBytesSent = 0;
+  String _connectionStatus = 'Microphone stopped';
   String _committedTranscript = '';
   String _partialTranscript = '';
   String? _errorMessage;
@@ -24,7 +35,7 @@ class _HomePageState extends State<HomePage> {
     super.initState();
     _client = TranscriptionBackendClient(
       onTranscript: (text, {required isFinal}) {
-        if (!mounted || !_enabled) return;
+        if (!mounted) return;
         setState(() {
           if (isFinal) {
             _committedTranscript = [
@@ -38,79 +49,162 @@ class _HomePageState extends State<HomePage> {
         });
       },
       onStatus: (status) {
-        if (mounted) {
-          setState(() {
-            _connectionStatus = status;
-            if (status == 'Disconnected') _connecting = false;
-          });
-        }
+        if (mounted) setState(() => _connectionStatus = status);
       },
       onError: (message) {
         if (mounted) setState(() => _errorMessage = message);
       },
     );
-    _connectToBackend();
   }
 
-  Future<void> _connectToBackend() async {
-    if (!_enabled || _connecting || _client.isConnected) return;
-    setState(() {
-      _connecting = true;
-      _errorMessage = null;
-    });
-    try {
-      final values = await Future.wait([
-        BackendConnectionStore.readUrl(),
-        BackendConnectionStore.readAccessToken(),
-      ]);
-      final url = values[0];
-      if (url == null || url.isEmpty) {
-        if (mounted) {
+Future<void> _startListening() async {
+  if (_isConnecting || _isListening) return;
+
+  setState(() {
+    _isConnecting = true;
+    _errorMessage = null;
+    _committedTranscript = '';
+    _partialTranscript = '';
+    _audioChunksSent = 0;
+    _audioBytesSent = 0;
+    _connectionStatus = 'Connecting to backend…';
+  });
+
+  try {
+    // 1. Read the saved backend URL and access token
+    final values = await Future.wait([
+      BackendConnectionStore.readUrl(),
+      BackendConnectionStore.readAccessToken(),
+    ]);
+    final url = values[0];
+    if (url == null || url.isEmpty) {
+      throw StateError('Add your apd_backend WebSocket URL in Settings.');
+    }
+
+    // 2. Connect to the backend first so no audio is captured before there is
+    //    somewhere to send it. The URL must end in /transcribe.
+    await _client.connect(url: url, accessToken: values[1]);
+
+    // 3. Start the microphone
+    await _audioService.startCapture();
+    final audioStream = _audioService.audioStream;
+    if (audioStream == null) {
+      throw StateError('Microphone audio stream is unavailable.');
+    }
+
+    // 4. Flip to listening BEFORE subscribing. The chunk handler checks
+    //    _isListening, so setting it afterwards would drop the first chunks.
+    _isListening = true;
+    if (mounted) {
+      setState(() => _connectionStatus = 'Listening and streaming audio');
+    }
+
+    // 5. Subscribe immediately: the stream is broadcast, so anything emitted
+    //    before this point would be lost.
+    _audioSubscription = audioStream.listen(
+      (audioChunk) {
+        if (!mounted || !_isListening) return;
+        try {
+          _client.sendAudioChunk(audioChunk);
+          setState(() {
+            _audioChunksSent++;
+            _audioBytesSent += audioChunk.length;
+          });
+        } catch (error) {
           setState(
-            () => _errorMessage =
-                'Add your apd_backend WebSocket URL in Settings.',
+            () => _errorMessage = 'Could not send microphone audio: $error',
+          );
+          unawaited(_stopListening());
+        }
+      },
+      onError: (Object error) {
+        if (mounted) {
+          setState(() => _errorMessage = 'Microphone capture failed: $error');
+        }
+        unawaited(_stopListening());
+      },
+      cancelOnError: false,
+    );
+  } catch (error) {
+    // Roll everything back so the next attempt starts clean
+    _isListening = false;
+    try {
+      await _audioSubscription?.cancel();
+      _audioSubscription = null;
+      await _audioService.stopCapture();
+    } catch (_) {
+      // best-effort cleanup
+    } finally {
+      await _client.stop();
+    }
+    if (mounted) {
+      setState(() {
+        _connectionStatus = 'Microphone stopped';
+        _errorMessage = error.toString();
+      });
+    }
+  } finally {
+    if (mounted) setState(() => _isConnecting = false);
+  }
+}
+
+  Future<void> _stopListening() async {
+    if (_isStopping) return;
+    if (mounted) setState(() => _isStopping = true);
+    try {
+      await _audioSubscription?.cancel();
+      _audioSubscription = null;
+      String? savedPath;
+      try {
+        savedPath = await _audioService.stopCapture();
+      } finally {
+        // Send stop after the last audio chunk so the backend can commit the tail.
+        await _client.stop();
+      }
+      if (mounted) {
+        setState(() {
+          _isListening = false;
+          _connectionStatus = 'Microphone stopped';
+        });
+        if (savedPath != null) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Recording saved on this device.')),
           );
         }
-        return;
       }
-      await _client.connect(url: url, accessToken: values[1]);
-    } catch (_) {
-      // Detailed connection errors are shown by the client callback.
+    } catch (error) {
+      if (mounted) {
+        setState(() => _errorMessage = 'Could not stop recording: $error');
+      }
     } finally {
-      if (mounted) setState(() => _connecting = false);
-    }
-  }
-
-  Future<void> _setEnabled(bool enabled) async {
-    setState(() {
-      _enabled = enabled;
-      _errorMessage = null;
-      _partialTranscript = '';
-      if (!enabled) {
-        _committedTranscript = '';
-        _connectionStatus = 'Not connected';
+      if (mounted) {
+        setState(() {
+          _isListening = false;
+          _connectionStatus = 'Microphone stopped';
+          _isStopping = false;
+        });
       }
-    });
-    if (enabled) {
-      await _connectToBackend();
-    } else {
-      await _client.stop();
     }
   }
 
   Future<void> _openSettings() async {
+    if (_isConnecting || _isStopping) return;
+    if (_isListening) await _stopListening();
+    if (!mounted) return;
     await Navigator.of(context)
         .push(MaterialPageRoute<void>(builder: (_) => const SettingsPage()));
-    if (_enabled) {
-      await _client.stop();
-      await _connectToBackend();
-    }
   }
 
   @override
   void dispose() {
-    _client.stop();
+    unawaited(_disposeResources());
     super.dispose();
+  }
+
+  Future<void> _disposeResources() async {
+    await _audioSubscription?.cancel();
+    await _audioService.dispose();
+    await _client.stop();
   }
 
   @override
@@ -126,9 +220,9 @@ class _HomePageState extends State<HomePage> {
         title: const Text('Conversation'),
         actions: [
           TextButton.icon(
-            onPressed: _openSettings,
-            icon: const Icon(Icons.settings_outlined),
+            onPressed: _isConnecting || _isStopping ? null : _openSettings,
             label: const Text('Settings'),
+            icon: const Icon(Iconsax.setting),
           ),
         ],
       ),
@@ -136,55 +230,68 @@ class _HomePageState extends State<HomePage> {
         child: Padding(
           padding: const EdgeInsets.all(24),
           child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
+              Icon(
+                _isListening ? Icons.mic : Icons.mic_none,
+                size: 64,
+                color: _isListening ? theme.colorScheme.primary : null,
+              ),
+              const SizedBox(height: 12),
               Text(
-                'Conversation transcript',
+                _isConnecting
+                    ? 'Connecting…'
+                    : _isStopping
+                    ? 'Stopping…'
+                    : _isListening
+                    ? 'Listening…'
+                    : 'Microphone stopped',
                 style: theme.textTheme.headlineSmall,
               ),
               const SizedBox(height: 8),
-              Text(
-                'Live transcription is relayed through apd_backend and ElevenLabs Scribe.',
-                style: theme.textTheme.bodyLarge?.copyWith(
-                  color: theme.colorScheme.onSurfaceVariant,
+              Text(_connectionStatus, textAlign: TextAlign.center),
+              const SizedBox(height: 12),
+              Text('Audio chunks sent: $_audioChunksSent'),
+              Text('Audio bytes sent: $_audioBytesSent'),
+              const SizedBox(height: 20),
+              FilledButton.icon(
+                onPressed: _isConnecting || _isStopping
+                    ? null
+                    : _isListening
+                    ? _stopListening
+                    : _startListening,
+                icon: Icon(_isListening ? Icons.stop : Icons.mic),
+                label: Text(
+                  _isConnecting
+                      ? 'CONNECTING…'
+                      : _isStopping
+                      ? 'STOPPING…'
+                      : _isListening
+                      ? 'STOP RECORDING'
+                      : 'START RECORDING',
                 ),
               ),
-              const SizedBox(height: 24),
-              Card(
-                child: SwitchListTile.adaptive(
-                  value: _enabled,
-                  onChanged: _setEnabled,
-                  title: const Text('Live transcription'),
-                  subtitle: Text(_enabled ? _connectionStatus : 'Turned off'),
-                  secondary: Icon(
-                    _connectionStatus.startsWith('Connected')
-                        ? Icons.cloud_done_outlined
-                        : Icons.cloud_off_outlined,
-                    color: _connectionStatus.startsWith('Connected')
-                        ? theme.colorScheme.primary
-                        : theme.colorScheme.onSurfaceVariant,
-                  ),
+              if (_errorMessage != null) ...[
+                const SizedBox(height: 12),
+                Text(
+                  _errorMessage!,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: theme.colorScheme.error),
                 ),
-              ),
+              ],
               const SizedBox(height: 20),
               Expanded(
                 child: Container(
                   width: double.infinity,
-                  padding: const EdgeInsets.all(20),
+                  padding: const EdgeInsets.all(16),
                   decoration: BoxDecoration(
                     color: theme.colorScheme.surfaceContainerLow,
-                    borderRadius: BorderRadius.circular(20),
+                    borderRadius: BorderRadius.circular(16),
                     border: Border.all(color: theme.colorScheme.outlineVariant),
                   ),
-                  child: _errorMessage != null
-                      ? Text(_errorMessage!, style: theme.textTheme.bodyLarge)
-                      : transcript.isEmpty
+                  child: transcript.isEmpty
                       ? Center(
                           child: Text(
-                            _enabled
-                                ? 'Waiting for audio input…'
-                                : 'Transcription is off.',
-                            textAlign: TextAlign.center,
+                            'Transcription will appear here.',
                             style: theme.textTheme.bodyLarge?.copyWith(
                               color: theme.colorScheme.onSurfaceVariant,
                             ),
@@ -199,9 +306,9 @@ class _HomePageState extends State<HomePage> {
                         ),
                 ),
               ),
-              const SizedBox(height: 16),
+              const SizedBox(height: 12),
               Text(
-                'Audio capture is not connected yet. Audio chunks can be sent through the transcription client when capture is merged.',
+                'Audio is saved on this device and streamed to the configured backend while recording.',
                 textAlign: TextAlign.center,
                 style: theme.textTheme.bodySmall?.copyWith(
                   color: theme.colorScheme.onSurfaceVariant,

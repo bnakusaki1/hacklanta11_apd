@@ -17,7 +17,6 @@ class TranscriptionBackendClient {
   WebSocket? _socket;
   StreamSubscription<dynamic>? _subscription;
   Completer<void>? _relayClosed;
-  Completer<void>? _sessionStarted;
 
   bool get isConnected => _socket?.readyState == WebSocket.open;
 
@@ -35,30 +34,24 @@ class TranscriptionBackendClient {
         headers['Authorization'] = 'Bearer $accessToken';
       }
       onStatus('Connecting to backend…');
-      _socket = await WebSocket.connect(uri.toString(), headers: headers);
+      _socket = await WebSocket.connect(
+        uri.toString(),
+        headers: headers,
+      ).timeout(const Duration(seconds: 5));
       _relayClosed = Completer<void>();
-      _sessionStarted = Completer<void>();
       _subscription = _socket!.listen(
         _handleMessage,
         onError: (Object error) {
-          if (!(_sessionStarted?.isCompleted ?? true)) {
-            _sessionStarted!.completeError(error);
-          }
           onStatus('Disconnected');
           onError('Connection to transcription backend failed: $error');
         },
         onDone: () {
-          if (!(_sessionStarted?.isCompleted ?? true)) {
-            _sessionStarted!.completeError(
-              Exception(
-                'Backend closed before the ElevenLabs session started.',
-              ),
-            );
-          }
           onStatus('Disconnected');
         },
       );
-      await _sessionStarted!.future.timeout(const Duration(seconds: 15));
+      // The completed websocket handshake confirms the backend accepted the
+      // connection. Do not wait for a relay_ready event before starting capture.
+      onStatus('Backend connected; starting transcription service…');
     } catch (error) {
       await _subscription?.cancel();
       _subscription = null;
@@ -80,13 +73,12 @@ class TranscriptionBackendClient {
       final event = jsonDecode(message) as Map<String, dynamic>;
       switch (event['message_type']) {
         case 'relay_ready':
-          onStatus('Connected; waiting for ElevenLabs session…');
+          onStatus('Backend connected; starting transcription service…');
         case 'session_started':
-          if (!(_sessionStarted?.isCompleted ?? true)) {
-            _sessionStarted!.complete();
-          }
-          onStatus('Connected to ElevenLabs; waiting for audio input.');
+          onStatus('Connected to transcription service.');
         case 'partial_transcript':
+        case 'final_transcript':
+        case 'final_transcript_with_timestamps':
           onTranscript(event['text'] as String? ?? '', isFinal: false);
         case 'committed_transcript':
         case 'committed_transcript_with_timestamps':
@@ -98,9 +90,6 @@ class TranscriptionBackendClient {
         case 'rate_limited':
           final message =
               event['error'] as String? ?? 'Transcription service error.';
-          if (!(_sessionStarted?.isCompleted ?? true)) {
-            _sessionStarted!.completeError(Exception(message));
-          }
           onError(message);
         default:
           break;
@@ -110,7 +99,7 @@ class TranscriptionBackendClient {
     }
   }
 
-  /// The future audio-capture integration should pass mono 16 kHz PCM16 chunks here.
+  /// Sends mono 16 kHz PCM16 chunks to the backend websocket relay.
   void sendAudioChunk(Uint8List chunk) {
     if (!isConnected) {
       throw StateError('Transcription backend is not connected.');
