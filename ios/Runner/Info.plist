@@ -27,7 +27,9 @@
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>Hacklanta uses the microphone to record audio during focus sessions you start.</string>
+	<string>Hacklanta streams microphone audio to ElevenLabs for live transcription while the feature is enabled.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Hacklanta uses speech recognition to provide live transcription through ElevenLabs.</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>audio</string>

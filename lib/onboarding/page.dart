@@ -17,22 +17,19 @@ class _OnboardingPageState extends State<OnboardingPage> {
     _OnboardingStep(
       icon: Icons.mic_none_rounded,
       title: 'Let’s talk about audio',
-      description:
-          'Hacklanta uses your microphone to capture audio for your focus sessions. Audio is only recorded when you choose to start a session.',
+      description: 'Hacklanta streams microphone audio to ElevenLabs for live transcription while the feature is on. You can turn it off at any time.',
       permission: _OnboardingPermission.microphone,
     ),
     _OnboardingStep(
       icon: Icons.headphones_rounded,
       title: 'Keep a session going',
-      description:
-          'Allow background activity so an active focus session can continue when you switch apps or lock your screen. On iPhone, background audio is managed by iOS and does not have a separate permission prompt.',
+      description: 'Allow background activity so an active focus session can continue when you switch apps or lock your screen. On iPhone, background audio is managed by iOS and does not have a separate permission prompt.',
       permission: _OnboardingPermission.backgroundActivity,
     ),
     _OnboardingStep(
       icon: Icons.notifications_none_rounded,
       title: 'Stay in the loop',
-      description:
-          'Notifications can let you know about your focus sessions and reminders. You can change this choice later in your device settings.',
+      description: 'Notifications can let you know about your focus sessions and reminders. You can change this choice later in your device settings.',
       permission: _OnboardingPermission.notifications,
     ),
   ];
@@ -102,7 +99,9 @@ class _OnboardingPageState extends State<OnboardingPage> {
               const Spacer(),
               FilledButton(
                 onPressed: _requestingPermission ? null : _continue,
-                child: Text(_requestingPermission ? 'Please wait…' : 'Continue'),
+                child: Text(
+                  _requestingPermission ? 'Please wait…' : 'Continue',
+                ),
               ),
             ],
           ),

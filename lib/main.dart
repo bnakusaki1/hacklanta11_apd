@@ -18,9 +18,8 @@ class MyApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         useMaterial3: true,
-        colorScheme: ColorScheme.fromSeed(seedColor: _projectBlue).copyWith(
-          primary: _projectBlue,
-        ),
+        colorScheme: ColorScheme.fromSeed(seedColor: _projectBlue)
+            .copyWith(primary: _projectBlue),
         textTheme: ThemeData.light().textTheme.apply(
           fontFamily: GoogleFonts.googleSans().fontFamily,
         ),
@@ -29,4 +28,3 @@ class MyApp extends StatelessWidget {
     );
   }
 }
-
