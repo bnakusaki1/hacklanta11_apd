@@ -37,6 +37,7 @@ dependencies:
   google_fonts: ^9.0.0
   iconsax: ^0.0.8
   permission_handler: ^12.0.1
+  record: ^7.1.2
 
 dev_dependencies:
   flutter_test:
