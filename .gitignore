@@ -32,6 +32,7 @@ migrate_working_dir/
 .pub/
 /build/
 /coverage/
+/apd_backend/node_modules/
 
 # Symbolication related
 app.*.symbols
