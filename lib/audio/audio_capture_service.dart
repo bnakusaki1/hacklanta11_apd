@@ -27,6 +27,7 @@ class AudioCaptureService {
     if (isCapturing || await _recorder.isRecording()) return;
 
     final hasPermission = await _recorder.hasPermission();
+    
     if (!hasPermission) {
       throw Exception('Microphone permission was not granted.');
     }
@@ -115,6 +116,7 @@ class AudioCaptureService {
 
     _controller = null;
     if (!controller.isClosed) await controller.close();
+
 
     return _currentFilePath;
   }

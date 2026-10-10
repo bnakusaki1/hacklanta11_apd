@@ -37,14 +37,8 @@ dependencies:
   google_fonts: ^9.0.0
   iconsax: ^0.0.8
   permission_handler: ^12.0.1
-  sherpa_onnx: ^1.13.8
-  record: ^6.1.2
-  path_provider: ^2.1.5
-  path: ^1.9.1
-  archive: ^4.4.0
-  flutter_secure_storage: ^9.2.4
-  font_awesome_flutter: ^11.0.0
-  elevenlabs_agents: ^0.6.1
+  record: ^7.1.2
+  path_provider: ^2.1.6
 
 dev_dependencies:
   flutter_test:

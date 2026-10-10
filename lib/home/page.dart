@@ -206,7 +206,7 @@ Future<void> _startListening() async {
     await _audioService.dispose();
     await _client.stop();
   }
-
+  
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -220,98 +220,41 @@ Future<void> _startListening() async {
         title: const Text('Conversation'),
         actions: [
           TextButton.icon(
-            onPressed: _isConnecting || _isStopping ? null : _openSettings,
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute<void>(builder: (_) => const SettingsPage()),
+            ),
             label: const Text('Settings'),
             icon: const Icon(Iconsax.setting),
           ),
         ],
       ),
-      body: SafeArea(
+      body: Center(
         child: Padding(
           padding: const EdgeInsets.all(24),
           child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(
-                _isListening ? Icons.mic : Icons.mic_none,
-                size: 64,
-                color: _isListening ? theme.colorScheme.primary : null,
-              ),
-              const SizedBox(height: 12),
-              Text(
-                _isConnecting
-                    ? 'Connecting…'
-                    : _isStopping
-                    ? 'Stopping…'
-                    : _isListening
-                    ? 'Listening…'
-                    : 'Microphone stopped',
-                style: theme.textTheme.headlineSmall,
-              ),
-              const SizedBox(height: 8),
-              Text(_connectionStatus, textAlign: TextAlign.center),
-              const SizedBox(height: 12),
-              Text('Audio chunks sent: $_audioChunksSent'),
-              Text('Audio bytes sent: $_audioBytesSent'),
+              Icon(_isListening ? Icons.mic : Icons.mic_none, size: 72),
               const SizedBox(height: 20),
+
+              Text(
+                _isListening ? 'Listening...' : 'Microphone stopped',
+                style: Theme.of(context).textTheme.headlineSmall,
+              ),
+
+              const SizedBox(height: 12),
+
+              Text('Audio chunks received: $_audioChunksReceived'),
+
+              Text('Audio bytes received: $_audioBytesReceived'),
+
+              const SizedBox(height: 30),
+
               FilledButton.icon(
-                onPressed: _isConnecting || _isStopping
-                    ? null
-                    : _isListening
-                    ? _stopListening
-                    : _startListening,
+                onPressed: _isListening ? _stopListening : _startListening,
                 icon: Icon(_isListening ? Icons.stop : Icons.mic),
                 label: Text(
-                  _isConnecting
-                      ? 'CONNECTING…'
-                      : _isStopping
-                      ? 'STOPPING…'
-                      : _isListening
-                      ? 'STOP RECORDING'
-                      : 'START RECORDING',
-                ),
-              ),
-              if (_errorMessage != null) ...[
-                const SizedBox(height: 12),
-                Text(
-                  _errorMessage!,
-                  textAlign: TextAlign.center,
-                  style: TextStyle(color: theme.colorScheme.error),
-                ),
-              ],
-              const SizedBox(height: 20),
-              Expanded(
-                child: Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: theme.colorScheme.surfaceContainerLow,
-                    borderRadius: BorderRadius.circular(16),
-                    border: Border.all(color: theme.colorScheme.outlineVariant),
-                  ),
-                  child: transcript.isEmpty
-                      ? Center(
-                          child: Text(
-                            'Transcription will appear here.',
-                            style: theme.textTheme.bodyLarge?.copyWith(
-                              color: theme.colorScheme.onSurfaceVariant,
-                            ),
-                          ),
-                        )
-                      : SingleChildScrollView(
-                          reverse: true,
-                          child: Text(
-                            transcript,
-                            style: theme.textTheme.bodyLarge,
-                          ),
-                        ),
-                ),
-              ),
-              const SizedBox(height: 12),
-              Text(
-                'Audio is saved on this device and streamed to the configured backend while recording.',
-                textAlign: TextAlign.center,
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: theme.colorScheme.onSurfaceVariant,
+                  _isListening ? 'STOP LISTENING' : 'START LISTENING',
                 ),
               ),
             ],
