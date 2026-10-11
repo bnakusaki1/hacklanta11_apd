@@ -248,6 +248,92 @@ class TranscriptionService {
     _channel?.sink.add(audioChunk);
   }
 
+  /// PUBLIC FUNCTION FOR REPEAT
+  ///
+  /// Returns the committed transcript words that overlap
+  /// the requested recording-time window.
+  ///
+  /// Example:
+  ///
+  /// final text = transcriptForTimeRange(
+  ///   startSeconds: 15,
+  ///   endSeconds: 20,
+  /// );
+  ///
+  /// This does NOT:
+  /// - stop the microphone
+  /// - stop recording
+  /// - disconnect ElevenLabs
+  /// - finish the transcription session
+  ///
+  /// It only reads timestamped words that we already have.
+  String transcriptForTimeRange({
+    required double startSeconds,
+    required double endSeconds,
+  }) {
+    if (endSeconds <= startSeconds) {
+      return '';
+    }
+
+    final selectedWords = <String>[];
+
+    for (final segment in _segments) {
+      for (final word in segment.words) {
+        final wordStart = word.start;
+        final wordEnd = word.end;
+
+        if (wordStart == null || wordEnd == null) {
+          continue;
+        }
+
+        final overlapsWindow =
+            wordEnd >= startSeconds && wordStart <= endSeconds;
+
+        if (overlapsWindow && word.text.isNotEmpty) {
+          selectedWords.add(word.text);
+        }
+      }
+    }
+
+    return selectedWords.join('').trim();
+  }
+
+  /// Convenience function for Repeat.
+  ///
+  /// Instead of manually calculating the start time,
+  /// the caller can provide the current recording time
+  /// and the number of seconds requested.
+  ///
+  /// Example:
+  ///
+  /// final text = transcriptForRecentSeconds(
+  ///   currentSeconds: 37,
+  ///   seconds: 10,
+  /// );
+  ///
+  /// This searches the 27s -> 37s transcript window.
+  String transcriptForRecentSeconds({
+    required double currentSeconds,
+    int seconds = 5,
+  }) {
+    if (seconds != 5 && seconds != 10 && seconds != 20) {
+      throw ArgumentError('Repeat duration must be 5, 10, or 20 seconds.');
+    }
+
+    if (currentSeconds <= 0) {
+      return '';
+    }
+
+    final startSeconds = (currentSeconds - seconds)
+        .clamp(0.0, currentSeconds)
+        .toDouble();
+
+    return transcriptForTimeRange(
+      startSeconds: startSeconds,
+      endSeconds: currentSeconds,
+    );
+  }
+
   Future<void> finishTranscription() async {
     final channel = _channel;
 
@@ -275,9 +361,11 @@ class TranscriptionService {
 
   Future<void> disconnect() async {
     await _messageSubscription?.cancel();
+
     _messageSubscription = null;
 
     await _channel?.sink.close();
+
     _channel = null;
 
     _finalCommitCompleter = null;
@@ -287,7 +375,9 @@ class TranscriptionService {
     await disconnect();
 
     await _transcriptController.close();
+
     await _partialTranscriptController.close();
+
     await _committedSegmentController.close();
   }
 }

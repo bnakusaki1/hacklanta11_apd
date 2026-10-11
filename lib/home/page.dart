@@ -2,6 +2,8 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:adp/audio/audio_capture_service.dart';
+import 'package:adp/audio/earphone_service.dart';
+import 'package:adp/audio/repeat_audio_service.dart';
 import 'package:adp/audio/transcription_service.dart';
 import 'package:adp/settings/page.dart';
 import 'package:audioplayers/audioplayers.dart';
@@ -17,7 +19,15 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> {
   final AudioCaptureService _audioService = AudioCaptureService();
+
+  final RepeatAudioService _repeatService = RepeatAudioService(
+    maxBufferSeconds: 20,
+  );
+
+  final EarphoneService _earphoneService = EarphoneService();
+
   final TranscriptionService _transcriptionService = TranscriptionService();
+
   final AudioPlayer _audioPlayer = AudioPlayer();
 
   StreamSubscription? _audioSubscription;
@@ -34,6 +44,7 @@ class _HomePageState extends State<HomePage> {
   bool _isListening = false;
   bool _isPlaying = false;
   bool _isStopping = false;
+  bool _isRepeating = false;
 
   int _audioChunksReceived = 0;
   int _audioBytesReceived = 0;
@@ -43,10 +54,22 @@ class _HomePageState extends State<HomePage> {
   String _partialTranscript = '';
   String _fullTranscript = '';
 
+  // Repeat result that is ALWAYS shown in the UI.
+  String _repeatTranscript = '';
+  int _repeatTranscriptSeconds = 5;
+
+  // Lets the UI explain whether audio was also played.
+  bool? _repeatUsedEarphones;
+
   final List<TranscriptSegment> _segments = [];
 
   Duration _playbackPosition = Duration.zero;
   Duration _recordingDuration = Duration.zero;
+
+  // PCM16 + 16 kHz + mono:
+  //
+  // 16000 samples/sec * 2 bytes/sample = 32000 bytes/sec.
+  static const double _audioBytesPerSecond = 32000.0;
 
   @override
   void initState() {
@@ -90,11 +113,13 @@ class _HomePageState extends State<HomePage> {
   Future<void> _startListening() async {
     try {
       await _audioPlayer.stop();
+      await _repeatService.stopRepeat();
 
-      // Connect to our backend / ElevenLabs pipeline.
+      // Every new session starts with an empty Repeat buffer.
+      _repeatService.clear();
+
       await _transcriptionService.connect();
 
-      // LIVE / PARTIAL transcript.
       _partialTranscriptSubscription = _transcriptionService
           .partialTranscriptStream
           .listen((text) {
@@ -107,7 +132,6 @@ class _HomePageState extends State<HomePage> {
             });
           });
 
-      // FULL committed transcript.
       _fullTranscriptSubscription = _transcriptionService.transcriptStream
           .listen((text) {
             debugPrint('FULL TRANSCRIPT UI: $text');
@@ -119,7 +143,6 @@ class _HomePageState extends State<HomePage> {
             });
           });
 
-      // Timestamped committed segments.
       _segmentSubscription = _transcriptionService.committedSegmentStream
           .listen((segment) {
             debugPrint(
@@ -134,7 +157,6 @@ class _HomePageState extends State<HomePage> {
             });
           });
 
-      // Start microphone capture.
       await _audioService.startCapture();
 
       if (mounted) {
@@ -145,6 +167,10 @@ class _HomePageState extends State<HomePage> {
           _fullTranscript = '';
           _segments.clear();
 
+          _repeatTranscript = '';
+          _repeatTranscriptSeconds = 5;
+          _repeatUsedEarphones = null;
+
           _playbackPosition = Duration.zero;
           _recordingDuration = Duration.zero;
 
@@ -153,12 +179,22 @@ class _HomePageState extends State<HomePage> {
 
           _isListening = true;
           _isStopping = false;
+          _isRepeating = false;
         });
       }
 
-      // Send every microphone chunk to transcription.
+      // IMPORTANT:
+      //
+      // The same microphone stream continuously goes to:
+      //
+      // 1. ElevenLabs
+      // 2. Repeat's rolling 20-second audio buffer
+      //
+      // Pressing Repeat does NOT cancel this subscription.
       _audioSubscription = _audioService.audioStream?.listen((audioChunk) {
         _transcriptionService.sendAudio(audioChunk);
+
+        _repeatService.addAudioChunk(audioChunk);
 
         if (!mounted) return;
 
@@ -194,6 +230,7 @@ class _HomePageState extends State<HomePage> {
       setState(() {
         _isListening = false;
         _isStopping = false;
+        _isRepeating = false;
       });
 
       ScaffoldMessenger.of(context).showSnackBar(
@@ -212,16 +249,12 @@ class _HomePageState extends State<HomePage> {
     }
 
     try {
-      // Stop sending new microphone chunks first.
       await _audioSubscription?.cancel();
       _audioSubscription = null;
 
-      // IMPORTANT:
-      // Tell the backend to commit the final ElevenLabs segment.
-      // Keep transcript listeners alive while we wait.
+      // Allow ElevenLabs to commit the final words.
       await _transcriptionService.finishTranscription();
 
-      // Save the audio.
       final savedPath = await _audioService.stopCapture();
 
       debugPrint('AUDIO SAVED LOCALLY: $savedPath');
@@ -236,8 +269,6 @@ class _HomePageState extends State<HomePage> {
         '${_transcriptionService.group2Payload}',
       );
 
-      // Only disconnect AFTER the final committed transcript
-      // has had a chance to arrive.
       await _transcriptionService.disconnect();
 
       await _partialTranscriptSubscription?.cancel();
@@ -280,6 +311,108 @@ class _HomePageState extends State<HomePage> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Could not stop listening: $error')),
       );
+    }
+  }
+
+  /// PUBLIC REPEAT ACTION USED BY THE UI.
+  ///
+  /// Behavior:
+  ///
+  /// 1. Determine the requested recent transcript.
+  /// 2. ALWAYS send that transcript to the UI.
+  /// 3. Check whether earphones are connected.
+  /// 4. If yes, replay the matching recent audio.
+  /// 5. If no, do not play audio.
+  ///
+  /// This function NEVER stops:
+  ///
+  /// - microphone capture
+  /// - ElevenLabs
+  /// - the audio subscription
+  /// - the recording session
+  Future<void> _repeatRecentAudio(int seconds) async {
+    if (!_repeatService.hasAudio || _isRepeating || _isStopping) {
+      return;
+    }
+
+    if (seconds != 5 && seconds != 10 && seconds != 20) {
+      return;
+    }
+
+    try {
+      if (mounted) {
+        setState(() {
+          _isRepeating = true;
+        });
+      }
+
+      // Because the microphone is PCM16, 16 kHz, mono:
+      //
+      // 32000 bytes = approximately 1 second.
+      //
+      // This gives us the current position in the recording.
+      final currentSeconds = _audioBytesReceived / _audioBytesPerSecond;
+
+      final recentText = _transcriptionService.transcriptForRecentSeconds(
+        currentSeconds: currentSeconds,
+        seconds: seconds,
+      );
+
+      // EARPHONE CHECK
+      final hasEarphones = await _earphoneService.hasEarphones();
+
+      if (!mounted) return;
+
+      // TEXT IS DISPLAYED REGARDLESS OF EARPHONES.
+      setState(() {
+        _repeatTranscriptSeconds = seconds;
+        _repeatUsedEarphones = hasEarphones;
+
+        if (recentText.isEmpty) {
+          _repeatTranscript =
+              'No committed transcript is available '
+              'for the last $seconds seconds yet.';
+        } else {
+          _repeatTranscript = recentText;
+        }
+      });
+
+      debugPrint(
+        'REPEAT REQUEST: '
+        '$seconds sec | '
+        'recording time: ${currentSeconds.toStringAsFixed(2)} sec | '
+        'earphones: $hasEarphones | '
+        'text: $recentText',
+      );
+
+      // ONLY play the audio when earphones are connected.
+      if (hasEarphones) {
+        debugPrint(
+          'REPEAT AUDIO: Playing the most recent '
+          '$seconds seconds through connected audio output.',
+        );
+
+        await _repeatService.repeatRecent(seconds: seconds);
+      } else {
+        debugPrint(
+          'REPEAT AUDIO: No earphones detected. '
+          'Showing transcript only.',
+        );
+      }
+    } catch (error) {
+      debugPrint('REPEAT ERROR: $error');
+
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not repeat recent conversation: $error')),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isRepeating = false;
+        });
+      }
     }
   }
 
@@ -357,6 +490,7 @@ class _HomePageState extends State<HomePage> {
     unawaited(_completeSubscription?.cancel());
 
     unawaited(_transcriptionService.dispose());
+    unawaited(_repeatService.dispose());
     unawaited(_audioPlayer.dispose());
     unawaited(_audioService.dispose());
 
@@ -365,6 +499,9 @@ class _HomePageState extends State<HomePage> {
 
   @override
   Widget build(BuildContext context) {
+    final repeatAvailable =
+        _repeatService.hasAudio && !_isRepeating && !_isStopping;
+
     return Scaffold(
       appBar: AppBar(
         actions: [
@@ -405,7 +542,6 @@ class _HomePageState extends State<HomePage> {
 
                 const SizedBox(height: 20),
 
-                // Current live / partial transcript.
                 if (_partialTranscript.isNotEmpty)
                   Card(
                     child: Padding(
@@ -424,7 +560,6 @@ class _HomePageState extends State<HomePage> {
                     ),
                   ),
 
-                // Full stable transcript.
                 if (_fullTranscript.isNotEmpty) ...[
                   const SizedBox(height: 16),
                   Card(
@@ -445,7 +580,6 @@ class _HomePageState extends State<HomePage> {
                   ),
                 ],
 
-                // Timestamped committed segments.
                 if (_segments.isNotEmpty) ...[
                   const SizedBox(height: 16),
                   Card(
@@ -490,6 +624,110 @@ class _HomePageState extends State<HomePage> {
                         : 'START LISTENING',
                   ),
                 ),
+
+                const SizedBox(height: 24),
+
+                Text(
+                  'Repeat recent conversation',
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+
+                const SizedBox(height: 4),
+
+                const Text(
+                  'Text is always shown. Audio plays only with earphones.',
+                  textAlign: TextAlign.center,
+                ),
+
+                const SizedBox(height: 4),
+
+                const Text('5 seconds is the default'),
+
+                const SizedBox(height: 12),
+
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  alignment: WrapAlignment.center,
+                  children: [
+                    FilledButton.tonal(
+                      onPressed: repeatAvailable
+                          ? () => _repeatRecentAudio(5)
+                          : null,
+                      child: const Text('5 SEC'),
+                    ),
+                    OutlinedButton(
+                      onPressed: repeatAvailable
+                          ? () => _repeatRecentAudio(10)
+                          : null,
+                      child: const Text('10 SEC'),
+                    ),
+                    OutlinedButton(
+                      onPressed: repeatAvailable
+                          ? () => _repeatRecentAudio(20)
+                          : null,
+                      child: const Text('20 SEC'),
+                    ),
+                  ],
+                ),
+
+                if (_isRepeating) ...[
+                  const SizedBox(height: 8),
+                  const Text('Getting recent conversation...'),
+                ],
+
+                // REPEAT RESULT
+                //
+                // This appears regardless of whether earphones
+                // are connected.
+                if (_repeatTranscript.isNotEmpty) ...[
+                  const SizedBox(height: 16),
+
+                  Card(
+                    child: Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              const Icon(Icons.replay),
+
+                              const SizedBox(width: 8),
+
+                              Expanded(
+                                child: Text(
+                                  'Repeat — Last '
+                                  '$_repeatTranscriptSeconds seconds',
+                                  style: Theme.of(context)
+                                      .textTheme
+                                      .titleMedium,
+                                ),
+                              ),
+                            ],
+                          ),
+
+                          const SizedBox(height: 10),
+
+                          Text(_repeatTranscript),
+
+                          const SizedBox(height: 10),
+
+                          if (_repeatUsedEarphones == true)
+                            const Text(
+                              '🎧 Audio replayed through '
+                              'connected earphones.',
+                            )
+                          else if (_repeatUsedEarphones == false)
+                            const Text(
+                              '🔇 No earphones detected — '
+                              'text only.',
+                            ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
 
                 if (_recordingPath != null) ...[
                   const SizedBox(height: 28),
