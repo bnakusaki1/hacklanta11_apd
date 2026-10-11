@@ -44,6 +44,9 @@ dependencies:
   smooth_page_indicator: ^3.0.0
   figma_squircle: ^0.6.3
   flutter_gemini: ^3.0.0
+  font_awesome_flutter: ^11.0.0
+  flutter_animate: ^4.5.2
+  flutter_markdown_plus: ^1.0.12
 
 dev_dependencies:
   flutter_test:

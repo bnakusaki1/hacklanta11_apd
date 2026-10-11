@@ -1,6 +1,6 @@
 import 'package:flutter_gemini/flutter_gemini.dart';
 
-const geminiApiKey = "AQ.Ab8RN6L20Xq0-Q5s3X739rZII6chF4ekU6pJHxalA6iZph-aTw"; // String.fromEnvironment('GEMINI_API_KEY');
+const geminiApiKey = "AQ.Ab8RN6K57CBIUHiLxIxsQhGyOTMR_vLN2rvfeh61lrh98Rm6Qw";
 
 class GeminiConversationSummarizer {
   static const _model = 'models/gemini-3.8-flash';
@@ -35,14 +35,37 @@ $transcript
       );
     }
 
-    final result = await Gemini.instance.prompt(
-      parts: [Part.text(prompt)],
-      model: _model,
-      generationConfig: GenerationConfig(
-        temperature: 0.2,
-        maxOutputTokens: maxOutputTokens,
-      ),
-    );
+    Candidates? result;
+    const maxAttempts = 3;
+
+    for (var attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        result = await Gemini.instance.prompt(
+          parts: [Part.text(prompt)],
+          model: _model,
+          generationConfig: GenerationConfig(
+            temperature: 0.2,
+            maxOutputTokens: maxOutputTokens,
+          ),
+        );
+        break;
+      } on GeminiException catch (error) {
+        final isTransient =
+            error.statusCode == -1 ||
+            const {429, 500, 502, 503, 504}.contains(error.statusCode);
+
+        if (!isTransient || attempt == maxAttempts) {
+          if (isTransient) {
+            throw StateError(
+              'Gemini is temporarily unavailable or your device cannot reach it. Check your connection and try again.',
+            );
+          }
+          rethrow;
+        }
+
+        await Future<void>.delayed(Duration(seconds: attempt));
+      }
+    }
 
     final summary = result?.output?.trim();
     if (summary == null || summary.isEmpty) {

@@ -1,3 +1,5 @@
+import 'package:flutter_animate/flutter_animate.dart';
+
 import 'dart:async';
 import 'dart:io';
 
@@ -7,6 +9,10 @@ import 'package:adp/settings/page.dart';
 import 'package:adp/summarization/gemini_conversation_summarizer.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
+import 'package:font_awesome_flutter/font_awesome_flutter.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:iconsax/iconsax.dart';
 
 class HomePage extends StatefulWidget {
@@ -501,214 +507,287 @@ class _HomePageState extends State<HomePage> {
 
   @override
   Widget build(BuildContext context) {
+    final label = _isStopping
+        ? 'FINISHING...'
+        : _isListening
+        ? 'Stop listening'
+        : 'Start listening';
+
     return Scaffold(
+      backgroundColor: Colors.transparent,
+      extendBodyBehindAppBar: true,
+      extendBody: true,
       appBar: AppBar(
+        surfaceTintColor: Colors.transparent,
+        title: Text(
+          'Sonomod',
+          style: GoogleFonts.bpmfHuninn(fontWeight: FontWeight.bold),
+        ),
+        backgroundColor: Color.fromRGBO(247, 252, 242, 1),
+        systemOverlayStyle: const SystemUiOverlayStyle(
+          statusBarColor: Colors.transparent,
+          statusBarIconBrightness: Brightness.dark,
+          statusBarBrightness: Brightness.light,
+        ),
         actions: [
-          TextButton.icon(
+          IconButton(
             onPressed: () => Navigator.of(context).push(
               MaterialPageRoute<void>(builder: (_) => const SettingsPage()),
             ),
-            label: const Text('Settings'),
-            icon: const Icon(Iconsax.setting),
+            icon: const FaIcon(
+              FontAwesomeIcons.gear,
+              size: 20,
+              color: Colors.black,
+            ),
           ),
         ],
       ),
-      body: Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: SingleChildScrollView(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(_isListening ? Icons.mic : Icons.mic_none, size: 72),
-
-                const SizedBox(height: 20),
-
-                Text(
-                  _isStopping
-                      ? 'Finishing transcript...'
-                      : _isListening
-                      ? 'Listening...'
-                      : 'Microphone stopped',
-                  style: Theme.of(context).textTheme.headlineSmall,
+      body: Container(
+        width: double.infinity,
+        height: double.infinity,
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.bottomCenter,
+            end: Alignment.topCenter,
+            colors: [
+              Color.fromRGBO(231, 244, 217, 1),
+              Color.fromRGBO(247, 252, 242, 1),
+            ],
+          ),
+        ),
+        child: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Expanded(
+                flex: 1,
+                child: ClipRect(
+                  child: ShaderMask(
+                    blendMode: BlendMode.dstIn,
+                    shaderCallback: (bounds) => const LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [Colors.transparent, Colors.black],
+                      stops: [0.0, 1], // fade zone: top 40% of the area
+                    ).createShader(bounds),
+                    child: OverflowBox(
+                      alignment: Alignment.bottomCenter,
+                      minHeight: 0,
+                      maxHeight: double.infinity,
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 15),
+                        child: Text(
+                          _partialTranscript,
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(
+                            fontSize: 30,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
                 ),
-
-                const SizedBox(height: 12),
-
-                Text('Audio chunks received: $_audioChunksReceived'),
-
-                Text('Audio bytes received: $_audioBytesReceived'),
-
-                const SizedBox(height: 20),
-
-                if (_segments.isNotEmpty || _partialTranscript.isNotEmpty)
-                  Card(
-                    child: Padding(
-                      padding: const EdgeInsets.all(16),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          Text(
-                            'Latest highlight',
-                            style: Theme.of(context).textTheme.titleMedium,
-                          ),
-                          const SizedBox(height: 8),
-                          FilledButton.tonalIcon(
-                            onPressed:
-                                _isSummarizingHighlight ||
-                                    _isSummarizingConversation
-                                ? null
-                                : _summarizeLatestHighlight,
-                            icon: _isSummarizingHighlight
-                                ? const SizedBox.square(
-                                    dimension: 18,
-                                    child: CircularProgressIndicator(
-                                      strokeWidth: 2,
-                                    ),
-                                  )
-                                : const Icon(Icons.auto_awesome),
-                            label: Text(
-                              _isSummarizingHighlight
-                                  ? 'Summarizing…'
-                                  : _latestHighlightButtonLabel,
-                            ),
-                          ),
-                          if (_highlightSummary.isNotEmpty) ...[
-                            const SizedBox(height: 8),
-                            Text(_highlightSummary),
-                          ],
-                        ],
-                      ),
-                    ),
-                  ),
-
-                if (_isSummarizingConversation ||
-                    _conversationSummary.isNotEmpty) ...[
-                  const SizedBox(height: 16),
-                  Card(
-                    child: Padding(
-                      padding: const EdgeInsets.all(16),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'Conversation summary',
-                            style: Theme.of(context).textTheme.titleMedium,
-                          ),
-                          const SizedBox(height: 8),
-                          if (_isSummarizingConversation)
-                            const LinearProgressIndicator(),
-                          if (_conversationSummary.isNotEmpty)
-                            Text(_conversationSummary),
-                        ],
-                      ),
-                    ),
-                  ),
-                ],
-
-                if (_summaryErrorMessage != null) ...[
-                  const SizedBox(height: 12),
-                  Text(
-                    _summaryErrorMessage!,
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      color: Theme.of(context).colorScheme.error,
-                    ),
-                  ),
-                ],
-
-                // Current live / partial transcript.
-                if (_partialTranscript.isNotEmpty)
-                  Card(
-                    child: Padding(
-                      padding: const EdgeInsets.all(16),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'Live transcript',
-                            style: Theme.of(context).textTheme.titleMedium,
-                          ),
-                          const SizedBox(height: 8),
-                          Text(_partialTranscript),
-                        ],
-                      ),
-                    ),
-                  ),
-
-                // Full stable transcript.
-                if (_fullTranscript.isNotEmpty) ...[
-                  const SizedBox(height: 16),
-                  Card(
-                    child: Padding(
-                      padding: const EdgeInsets.all(16),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'Full transcript',
-                            style: Theme.of(context).textTheme.titleMedium,
-                          ),
-                          const SizedBox(height: 8),
-                          Text(_fullTranscript),
-                        ],
-                      ),
-                    ),
-                  ),
-                ],
-
-                // Timestamped committed segments.
-                if (_segments.isNotEmpty) ...[
-                  const SizedBox(height: 16),
-                  Card(
-                    child: Padding(
-                      padding: const EdgeInsets.all(16),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'Timestamped transcript',
-                            style: Theme.of(context).textTheme.titleMedium,
-                          ),
-                          const SizedBox(height: 8),
-                          for (final segment in _segments)
-                            Padding(
-                              padding: const EdgeInsets.only(bottom: 8),
-                              child: Text(
-                                '[${_formatTimestamp(segment.start)}] '
-                                '${segment.text}',
+              ),
+              Expanded(
+                flex: 1,
+                child: Container(
+                  child: Column(
+                    children: [
+                      if (_isSummarizingConversation ||
+                          _conversationSummary.isNotEmpty) ...[
+                        const SizedBox(height: 16),
+                        Padding(
+                          padding: const EdgeInsets.all(16),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.center,
+                            // mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Text(
+                                'Conversation summary',
+                                style: TextStyle(
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.bold,
+                                ),
                               ),
-                            ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ],
+                              const SizedBox(height: 8),
+                              if (_isSummarizingConversation)
+                                const LinearProgressIndicator(),
+                              if (_conversationSummary.isNotEmpty)
+                                MarkdownBody(
+                                  data: _conversationSummary,
+                                  styleSheet:
+                                      MarkdownStyleSheet.fromTheme(
+                                        Theme.of(context),
+                                      ).copyWith(
+                                        h1: Theme.of(context)
+                                            .textTheme
+                                            .headlineMedium,
+                                        code: const TextStyle(
+                                          fontFamily: 'monospace',
+                                          backgroundColor: Color(0x11000000),
+                                        ),
+                                        blockquotePadding: const EdgeInsets.all(
+                                          12,
+                                        ),
+                                      ),
+                                ),
+                              // Markdown(data: _conversationSummary),
+                              // Text(
+                              //   _conversationSummary,
+                              //   // textAlign: TextAlign.center,
+                              //   style: TextStyle(fontSize: 16, height: 1.5),
+                              // ),
+                            ],
+                          ),
+                        ),
+                      ],
+                      if (_segments.isNotEmpty || _partialTranscript.isNotEmpty)
+                        Padding(
+                          padding: const EdgeInsets.all(16),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              Text(
+                                'Latest highlight',
+                                style: Theme.of(context).textTheme.titleMedium,
+                              ),
+                              const SizedBox(height: 8),
 
-                const SizedBox(height: 30),
-
-                FilledButton.icon(
-                  onPressed: _isStopping
-                      ? null
-                      : _isListening
-                      ? _stopListening
-                      : _startListening,
-                  icon: Icon(_isListening ? Icons.stop : Icons.mic),
-                  label: Text(
-                    _isStopping
-                        ? 'FINISHING...'
-                        : _isListening
-                        ? 'STOP LISTENING'
-                        : 'START LISTENING',
+                              if (_highlightSummary.isNotEmpty) ...[
+                                const SizedBox(height: 8),
+                                Text(_highlightSummary),
+                              ],
+                            ],
+                          ),
+                        ),
+                      if (_summaryErrorMessage != null) ...[
+                        const SizedBox(height: 12),
+                        Text(
+                          _summaryErrorMessage!,
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            color: Theme.of(context).colorScheme.error,
+                          ),
+                        ),
+                      ],
+                    ],
                   ),
                 ),
+              ),
+            ],
+          ),
+        ),
+      ),
+      bottomNavigationBar: BottomAppBar(
+        height: 200,
+        color: Colors.transparent,
+        child: Padding(
+          padding: const EdgeInsets.all(8),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            mainAxisAlignment: MainAxisAlignment.end,
+            spacing: 8,
+            children: [
+              // if (_isPlaying)
+              FilledButton.tonalIcon(
+                    style: FilledButton.styleFrom(
+                      fixedSize: const Size(double.maxFinite, 60),
+                    ),
+                    onPressed:
+                        _isSummarizingHighlight || _isSummarizingConversation
+                        ? null
+                        : _summarizeLatestHighlight,
+                    icon: _isSummarizingHighlight
+                        ? const SizedBox.square(
+                            dimension: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.auto_awesome),
+                    label: Text(
+                      _isSummarizingHighlight
+                          ? 'Summarizing…'
+                          : _latestHighlightButtonLabel,
+                    ),
+                  )
+                  .animate(target: _isListening ? 1 : 0)
+                  .fadeIn(duration: 250.ms)
+                  .scale(duration: 250.ms, curve: Curves.easeInOut),
+              SizedBox.shrink()
+                  .animate(target: _isListening ? 1 : 0)
+                  .custom(
+                    duration: 400.ms,
+                    curve: Curves.easeInOut,
+                    builder: (context, value, _) {
+                      final backgroundColor = Color.lerp(
+                        Colors.white,
+                        Colors.red.shade100,
+                        value,
+                      )!;
+                      final foregroundColor = Color.lerp(
+                        Colors.black,
+                        Colors.red.shade900,
+                        value,
+                      )!;
 
-                if (_recordingPath != null) ...[
-                  const SizedBox(height: 28),
-                  _buildRecordingCard(Theme.of(context)),
-                ],
-              ],
-            ),
+                      return FilledButton.icon(
+                        icon: Padding(
+                          padding: const EdgeInsets.only(bottom: 3),
+                          child: FaIcon(
+                            _isStopping
+                                ? FontAwesomeIcons.spinner
+                                : _isListening
+                                ? FontAwesomeIcons.stop
+                                : FontAwesomeIcons.microphone,
+                            size: 20,
+                          ),
+                        ),
+                        label: AnimatedSwitcher(
+                          duration: 250.ms,
+                          switchInCurve: Curves.easeOutBack,
+                          switchOutCurve: Curves.easeIn,
+                          transitionBuilder: (child, animation) =>
+                              FadeTransition(
+                                opacity: animation,
+                                child: ScaleTransition(
+                                  scale: Tween<double>(
+                                    begin: 0.6,
+                                    end: 1.0,
+                                  ).animate(animation),
+                                  child: child,
+                                ),
+                              ),
+                          child: Text(
+                            label,
+                            key: ValueKey(label),
+                            style: const TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                              height: 1,
+                            ),
+                          ),
+                        ),
+                        style: ButtonStyle(
+                          backgroundColor: WidgetStateProperty.all(
+                            backgroundColor,
+                          ),
+                          foregroundColor: WidgetStateProperty.all(
+                            foregroundColor,
+                          ),
+                          fixedSize: WidgetStateProperty.all(
+                            const Size(double.maxFinite, 60),
+                          ),
+                        ),
+                        onPressed: _isStopping
+                            ? null
+                            : _isListening
+                            ? _stopListening
+                            : _startListening,
+                      );
+                    },
+                  ),
+            ],
           ),
         ),
       ),

@@ -8,13 +8,13 @@ import 'summarization/gemini_conversation_summarizer.dart';
 const _projectBlue = Color(0xFF1D4ED8);
 
 void main() {
-  if (geminiApiKey.isNotEmpty) {
-    Gemini.init(
-      apiKey: geminiApiKey,
-      enableDebugging: false,
-      disableAutoUpdateModelName: true,
-    );
-  }
+  // Initialize even when the key is absent so Gemini.instance is never left
+  // uninitialized. Summarization checks the key and displays setup guidance.
+  Gemini.reInitialize(
+    apiKey: geminiApiKey,
+    enableDebugging: false,
+    disableAutoUpdateModelName: true,
+  );
   runApp(const MyApp());
 }
 
