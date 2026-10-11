@@ -57,7 +57,6 @@ class _HomePageState extends State<HomePage> {
   String _summaryTitle = 'Conversation summary';
   String? _summaryErrorMessage;
   int _summarySessionId = 0;
-  int _highlightRequestId = 0;
   int _summaryRequestId = 0;
 
   final List<TranscriptSegment> _segments = [];
@@ -109,7 +108,6 @@ class _HomePageState extends State<HomePage> {
       await _audioPlayer.stop();
 
       _summarySessionId++;
-      _highlightRequestId++;
       _summaryRequestId++;
       setState(() {
         _conversationSummary = '';
@@ -132,13 +130,6 @@ class _HomePageState extends State<HomePage> {
 
             setState(() {
               _partialTranscript = text;
-              _conversationSummary = '';
-              _highlightRequestId++;
-              if (_isSummarizingHighlight) {
-                _summaryRequestId++;
-                _isSummarizingHighlight = false;
-              }
-              _summaryErrorMessage = null;
             });
           });
 
@@ -166,13 +157,6 @@ class _HomePageState extends State<HomePage> {
 
             setState(() {
               _segments.add(segment);
-              _conversationSummary = '';
-              _highlightRequestId++;
-              if (_isSummarizingHighlight) {
-                _summaryRequestId++;
-                _isSummarizingHighlight = false;
-              }
-              _summaryErrorMessage = null;
             });
           });
 
@@ -414,7 +398,6 @@ class _HomePageState extends State<HomePage> {
 
     final summaryTitle = _latestHighlightButtonLabel;
     final sessionId = _summarySessionId;
-    final requestId = ++_highlightRequestId;
     final summaryRequestId = ++_summaryRequestId;
     setState(() {
       _isSummarizingHighlight = true;
@@ -428,7 +411,6 @@ class _HomePageState extends State<HomePage> {
       final summary = await _summarizer.summarizeHighlight(contextText);
       if (!mounted ||
           sessionId != _summarySessionId ||
-          requestId != _highlightRequestId ||
           summaryRequestId != _summaryRequestId) {
         return;
       }
@@ -436,7 +418,6 @@ class _HomePageState extends State<HomePage> {
     } catch (error) {
       if (!mounted ||
           sessionId != _summarySessionId ||
-          requestId != _highlightRequestId ||
           summaryRequestId != _summaryRequestId) {
         return;
       }
@@ -444,7 +425,6 @@ class _HomePageState extends State<HomePage> {
     } finally {
       if (mounted &&
           sessionId == _summarySessionId &&
-          requestId == _highlightRequestId &&
           summaryRequestId == _summaryRequestId) {
         setState(() => _isSummarizingHighlight = false);
       }
@@ -605,63 +585,64 @@ class _HomePageState extends State<HomePage> {
               Expanded(
                 flex: 1,
                 child: Container(
-                  child: Column(
-                    children: [
-                      if (_isSummarizingHighlight ||
-                          _isSummarizingConversation ||
-                          _conversationSummary.isNotEmpty) ...[
-                        const SizedBox(height: 16),
-                        Padding(
-                          padding: const EdgeInsets.all(16),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.center,
-                            // mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Text(
-                                _summaryTitle,
-                                style: TextStyle(
-                                  fontSize: 18,
-                                  fontWeight: FontWeight.bold,
+                  child: SingleChildScrollView(
+                    child: Column(
+                      children: [
+                        if (_isSummarizingHighlight ||
+                            _isSummarizingConversation ||
+                            _conversationSummary.isNotEmpty) ...[
+                          const SizedBox(height: 16),
+                          Padding(
+                            padding: const EdgeInsets.all(16),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.center,
+                              // mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Text(
+                                  _summaryTitle,
+                                  style: TextStyle(
+                                    fontSize: 18,
+                                    fontWeight: FontWeight.bold,
+                                  ),
                                 ),
-                              ),
-                              const SizedBox(height: 8),
-                              if (_isSummarizingHighlight ||
-                                  _isSummarizingConversation)
-                                const CircularProgressIndicator(),
-                              if (_conversationSummary.isNotEmpty)
-                                MarkdownBody(
-                                  data: _conversationSummary,
-                                  styleSheet:
-                                      MarkdownStyleSheet.fromTheme(
-                                        Theme.of(context),
-                                      ).copyWith(
-                                        h1: Theme.of(context)
-                                            .textTheme
-                                            .headlineMedium,
-                                        code: const TextStyle(
-                                          fontFamily: 'monospace',
-                                          backgroundColor: Color(0x11000000),
+                                const SizedBox(height: 8),
+                                if (_isSummarizingHighlight ||
+                                    _isSummarizingConversation)
+                                  const CircularProgressIndicator(),
+                                if (_conversationSummary.isNotEmpty)
+                                  MarkdownBody(
+                                    data: _conversationSummary,
+                                    styleSheet:
+                                        MarkdownStyleSheet.fromTheme(
+                                          Theme.of(context),
+                                        ).copyWith(
+                                          h1: Theme.of(context)
+                                              .textTheme
+                                              .headlineMedium,
+                                          code: const TextStyle(
+                                            fontFamily: 'monospace',
+                                            backgroundColor: Color(0x11000000),
+                                          ),
+                                          blockquotePadding:
+                                              const EdgeInsets.all(12),
                                         ),
-                                        blockquotePadding: const EdgeInsets.all(
-                                          12,
-                                        ),
-                                      ),
-                                ),
-                            ],
+                                  ),
+                              ],
+                            ),
                           ),
-                        ),
-                      ],
-                      if (_summaryErrorMessage != null) ...[
-                        const SizedBox(height: 12),
-                        Text(
-                          _summaryErrorMessage!,
-                          textAlign: TextAlign.center,
-                          style: TextStyle(
-                            color: Theme.of(context).colorScheme.error,
+                        ],
+                        if (_summaryErrorMessage != null) ...[
+                          const SizedBox(height: 12),
+                          Text(
+                            _summaryErrorMessage!,
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              color: Theme.of(context).colorScheme.error,
+                            ),
                           ),
-                        ),
+                        ],
                       ],
-                    ],
+                    ),
                   ),
                 ),
               ),
@@ -687,12 +668,7 @@ class _HomePageState extends State<HomePage> {
                         _isSummarizingHighlight || _isSummarizingConversation
                         ? null
                         : _summarizeLatestHighlight,
-                    icon: _isSummarizingHighlight
-                        ? const SizedBox.square(
-                            dimension: 18,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Icon(Icons.auto_awesome),
+                    icon: const Icon(Icons.auto_awesome),
                     label: Text(
                       _isSummarizingHighlight
                           ? 'Summarizing…'
