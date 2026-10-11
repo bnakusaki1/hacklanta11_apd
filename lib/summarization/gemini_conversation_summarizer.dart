@@ -1,11 +1,11 @@
 import 'package:flutter_gemini/flutter_gemini.dart';
 
-const geminiApiKey = "";
+const x = "AQ.Ab8RN6K57CBIUHiLxIxsQhGyOTMR_vLN2rvfeh61lrh98Rm6Qw";
 
 class GeminiConversationSummarizer {
   static const _model = 'models/gemini-3.8-flash';
 
-  bool get isConfigured => geminiApiKey.isNotEmpty;
+  bool get isConfigured => x.isNotEmpty;
 
   Future<String> summarizeHighlight(String transcriptContext) {
     return _generate('''

@@ -11,7 +11,7 @@ void main() {
   // Initialize even when the key is absent so Gemini.instance is never left
   // uninitialized. Summarization checks the key and displays setup guidance.
   Gemini.reInitialize(
-    apiKey: geminiApiKey,
+    apiKey: x,
     enableDebugging: false,
     disableAutoUpdateModelName: true,
   );
