@@ -49,9 +49,9 @@ class MainActivity : FlutterActivity() {
             setCallback(object : MediaSession.Callback() {
                 @Suppress("DEPRECATION")
                 override fun onMediaButtonEvent(
-                    mediaButtonIntent: Intent?,
+                    mediaButtonIntent: Intent,
                 ): Boolean {
-                    val intent = mediaButtonIntent ?: return false
+                    val intent = mediaButtonIntent
                     val event: KeyEvent? = if (Build.VERSION.SDK_INT >= 33) {
                         intent.getParcelableExtra(
                             Intent.EXTRA_KEY_EVENT,

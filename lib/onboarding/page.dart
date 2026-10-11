@@ -1,6 +1,7 @@
 import 'package:adp/home/page.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:smooth_page_indicator/smooth_page_indicator.dart';
 
@@ -19,21 +20,21 @@ class _OnboardingPageState extends State<OnboardingPage> {
 
   static const _steps = <_OnboardingStep>[
     _OnboardingStep(
-      imagePath: "assets/images/1.jpg",
+      imagePath: 'assets/svgs/undraw_day-dreaming_2mlz.svg',
       title: 'Focus\nBetter',
       bg: const Color.fromRGBO(244, 219, 214, 1),
       description: 'Access smart summaries and intelligent rewinds to instantly catch up on missed conversation details during your focus sessions.',
       permission: _OnboardingPermission.microphone,
     ),
     _OnboardingStep(
-      imagePath: "assets/images/1.jpg",
+      imagePath: 'assets/svgs/undraw_around-the-world_1p8h.svg',
       title: 'Multi\nLingual',
       bg: const Color.fromRGBO(246, 253, 226, 1),
       description: 'Allow background activity so audio filtering and live processing remain uninterrupted across more than 90 supported languages continuously.',
       permission: _OnboardingPermission.backgroundActivity,
     ),
     _OnboardingStep(
-      imagePath: "assets/images/1.jpg",
+      imagePath: 'assets/svgs/undraw_lost-in-music_plu7.svg',
       title: 'Sound\nLocalization',
       bg: const Color.fromRGBO(250, 231, 213, 1),
       description: 'Enable instant notifications to receive real-time directional alerts for critical environmental sounds like sirens or urgent alarms nearby.',
@@ -129,15 +130,37 @@ class _OnboardingPageState extends State<OnboardingPage> {
                           ),
                         ),
                       ),
-                      Spacer(),
-                      Padding(
-                        padding: const EdgeInsets.only(bottom: 150),
-                        child: Text(
-                          step.description,
-                          style: TextStyle(
-                            fontSize: 18,
-                            height: 1.5,
-                            fontWeight: FontWeight.w600,
+                      Expanded(
+                        child: Center(
+                          child: LayoutBuilder(
+                            builder: (context, constraints) {
+                              final illustrationSize = constraints.maxWidth <
+                                      constraints.maxHeight
+                                  ? constraints.maxWidth
+                                  : constraints.maxHeight;
+                              return SvgPicture.asset(
+                                step.imagePath,
+                                semanticsLabel:
+                                    step.title.replaceAll('\n', ' '),
+                                fit: BoxFit.contain,
+                                width: illustrationSize,
+                                height: illustrationSize,
+                              );
+                            },
+                          ),
+                        ),
+                      ),
+                      SizedBox(
+                        height: 230,
+                        child: Padding(
+                          padding: const EdgeInsets.only(top: 12),
+                          child: Text(
+                            step.description,
+                            style: const TextStyle(
+                              fontSize: 18,
+                              height: 1.5,
+                              fontWeight: FontWeight.w600,
+                            ),
                           ),
                         ),
                       ),

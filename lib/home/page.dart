@@ -1,7 +1,4 @@
-import 'package:flutter_animate/flutter_animate.dart';
-
 import 'dart:async';
-import 'dart:io';
 
 import 'package:adp/audio/audio_capture_service.dart';
 import 'package:adp/audio/earphone_service.dart';
@@ -12,10 +9,10 @@ import 'package:adp/summarization/gemini_conversation_summarizer.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:iconsax/iconsax.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -359,11 +356,10 @@ class _HomePageState extends State<HomePage> {
 
     try {
       final currentSeconds = _audioBytesReceived / _audioBytesPerSecond;
-      final recentTranscript =
-          _transcriptionService.transcriptForRecentSeconds(
-            currentSeconds: currentSeconds,
-            seconds: seconds,
-          );
+      final recentTranscript = _transcriptionService.transcriptForRecentSeconds(
+        currentSeconds: currentSeconds,
+        seconds: seconds,
+      );
       final hasEarphones = await _earphoneService.hasEarphones();
 
       if (!mounted) return;
@@ -372,7 +368,7 @@ class _HomePageState extends State<HomePage> {
         _repeatTranscriptSeconds = seconds;
         _repeatUsedEarphones = hasEarphones;
         _repeatTranscript = recentTranscript.isEmpty
-            ? 'No committed transcript is available for the last $seconds seconds yet.'
+            ? 'No committed transcript yet.'
             : recentTranscript;
       });
 
@@ -388,41 +384,6 @@ class _HomePageState extends State<HomePage> {
     } finally {
       if (mounted) setState(() => _isRepeating = false);
     }
-  }
-
-  Future<void> _togglePlayback() async {
-    final path = _recordingPath;
-
-    if (path == null) return;
-
-    try {
-      if (_isPlaying) {
-        await _audioPlayer.pause();
-      } else {
-        if (_recordingDuration > Duration.zero &&
-            _playbackPosition >= _recordingDuration) {
-          await _audioPlayer.seek(Duration.zero);
-        }
-
-        await _audioPlayer.play(DeviceFileSource(path));
-      }
-    } catch (error) {
-      if (!mounted) return;
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Could not play recording: $error')),
-      );
-    }
-  }
-
-  Future<void> _seekPlayback(double value) async {
-    final durationMs = _recordingDuration.inMilliseconds;
-
-    if (durationMs <= 0) return;
-
-    await _audioPlayer.seek(
-      Duration(milliseconds: (durationMs * value).round()),
-    );
   }
 
   String get _latestHighlightButtonLabel {
@@ -465,6 +426,11 @@ class _HomePageState extends State<HomePage> {
   }
 
   Future<void> _summarizeLatestHighlight() async {
+    setState(() {
+      _summaryErrorMessage = null;
+      _conversationSummary = '';
+      _repeatTranscript = '';
+    });
     final contextText = _latestHighlightContext();
     if (contextText.isEmpty || _isSummarizingHighlight) return;
 
@@ -539,14 +505,6 @@ class _HomePageState extends State<HomePage> {
         setState(() => _isSummarizingConversation = false);
       }
     }
-  }
-
-  String _formatDuration(Duration duration) {
-    final minutes = duration.inMinutes.toString().padLeft(2, '0');
-
-    final seconds = (duration.inSeconds % 60).toString().padLeft(2, '0');
-
-    return '$minutes:$seconds';
   }
 
   @override
@@ -665,41 +623,6 @@ class _HomePageState extends State<HomePage> {
                   child: SingleChildScrollView(
                     child: Column(
                       children: [
-                        if (_repeatTranscript.isNotEmpty)
-                          Padding(
-                            padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-                            child: Card(
-                              child: Padding(
-                                padding: const EdgeInsets.all(14),
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Row(
-                                      children: [
-                                        const Icon(Icons.replay),
-                                        const SizedBox(width: 8),
-                                        Text(
-                                          'Last $_repeatTranscriptSeconds seconds',
-                                          style: Theme.of(context)
-                                              .textTheme
-                                              .titleMedium,
-                                        ),
-                                      ],
-                                    ),
-                                    const SizedBox(height: 8),
-                                    Text(_repeatTranscript),
-                                    const SizedBox(height: 8),
-                                    Text(
-                                      _repeatUsedEarphones == true
-                                          ? 'Audio replayed through connected headphones.'
-                                          : 'No headphones detected — transcript only.',
-                                      style: Theme.of(context).textTheme.bodySmall,
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ),
-                          ),
                         if (_isSummarizingHighlight ||
                             _isSummarizingConversation ||
                             _conversationSummary.isNotEmpty) ...[
@@ -708,7 +631,6 @@ class _HomePageState extends State<HomePage> {
                             padding: const EdgeInsets.all(16),
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.center,
-                              // mainAxisAlignment: MainAxisAlignment.center,
                               children: [
                                 Text(
                                   _summaryTitle,
@@ -743,6 +665,44 @@ class _HomePageState extends State<HomePage> {
                             ),
                           ),
                         ],
+                        if (!(_isSummarizingHighlight ||
+                                _isSummarizingConversation ||
+                                _conversationSummary.isNotEmpty) &&
+                            _repeatTranscript.isNotEmpty &&
+                            _isListening)
+                          Padding(
+                            padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  children: [
+                                    Text(
+                                      'Last $_repeatTranscriptSeconds seconds',
+                                      style: TextStyle(
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 8),
+                                Text(_repeatTranscript),
+                                const SizedBox(height: 8),
+                                Text(
+                                  _repeatUsedEarphones == true
+                                      ? 'Audio replayed through connected headphones.'
+                                      : 'No headphones detected — transcript only.',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: Theme.of(context)
+                                        .colorScheme
+                                        .onSurface
+                                        .withOpacity(0.6),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
                         if (_summaryErrorMessage != null) ...[
                           const SizedBox(height: 12),
                           Text(
@@ -772,40 +732,78 @@ class _HomePageState extends State<HomePage> {
             mainAxisAlignment: MainAxisAlignment.end,
             spacing: 8,
             children: [
-              Text(
-                _isRepeating ? 'Finding recent audio…' : 'Rewind recent audio',
-                style: Theme.of(context).textTheme.labelLarge,
-              ),
               Row(
-                children: [
-                  Expanded(
-                    child: OutlinedButton(
-                      onPressed: repeatAvailable
-                          ? () => _repeatRecentAudio(5)
-                          : null,
-                      child: const Text('5 sec'),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: OutlinedButton(
-                      onPressed: repeatAvailable
-                          ? () => _repeatRecentAudio(10)
-                          : null,
-                      child: const Text('10 sec'),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: OutlinedButton(
-                      onPressed: repeatAvailable
-                          ? () => _repeatRecentAudio(20)
-                          : null,
-                      child: const Text('20 sec'),
-                    ),
-                  ),
-                ],
-              ),
+                    children: [
+                      Expanded(
+                        child: TextButton.icon(
+                          style: TextButton.styleFrom(
+                            foregroundColor: repeatAvailable
+                                ? Colors.black
+                                : Theme.of(context).colorScheme.onSurface
+                                      .withOpacity(0.38),
+                          ),
+                          icon: FaIcon(
+                            FontAwesomeIcons.arrowRotateLeft,
+                            size: 12,
+                          ),
+                          onPressed: repeatAvailable
+                              ? () => _repeatRecentAudio(5)
+                              : null,
+                          label: const Text(
+                            '5 sec',
+                            style: TextStyle(fontSize: 12),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: TextButton.icon(
+                          style: TextButton.styleFrom(
+                            foregroundColor: repeatAvailable
+                                ? Colors.black
+                                : Theme.of(context).colorScheme.onSurface
+                                      .withOpacity(0.38),
+                          ),
+                          icon: FaIcon(
+                            FontAwesomeIcons.arrowRotateLeft,
+                            size: 12,
+                          ),
+                          onPressed: repeatAvailable
+                              ? () => _repeatRecentAudio(10)
+                              : null,
+                          label: const Text(
+                            '10 sec',
+                            style: TextStyle(fontSize: 12),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: TextButton.icon(
+                          style: TextButton.styleFrom(
+                            foregroundColor: repeatAvailable
+                                ? Colors.black
+                                : Theme.of(context).colorScheme.onSurface
+                                      .withOpacity(0.38),
+                          ),
+                          icon: FaIcon(
+                            FontAwesomeIcons.arrowRotateLeft,
+                            size: 12,
+                          ),
+                          onPressed: repeatAvailable
+                              ? () => _repeatRecentAudio(20)
+                              : null,
+                          label: const Text(
+                            '20 sec',
+                            style: TextStyle(fontSize: 12),
+                          ),
+                        ),
+                      ),
+                    ],
+                  )
+                  .animate(target: _isListening ? 1 : 0)
+                  .fadeIn(duration: 250.ms)
+                  .scale(duration: 250.ms, curve: Curves.easeInOut),
               FilledButton.tonalIcon(
                     style: FilledButton.styleFrom(
                       fixedSize: const Size(double.maxFinite, 60),
@@ -900,73 +898,6 @@ class _HomePageState extends State<HomePage> {
                   ),
             ],
           ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildRecordingCard(ThemeData theme) {
-    final path = _recordingPath!;
-
-    final durationMs = _recordingDuration.inMilliseconds;
-
-    final progress = durationMs <= 0
-        ? 0.0
-        : (_playbackPosition.inMilliseconds / durationMs)
-              .clamp(0.0, 1.0)
-              .toDouble();
-
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Icon(Icons.audio_file, color: theme.colorScheme.primary),
-
-                const SizedBox(width: 12),
-
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Your recording',
-                        style: theme.textTheme.titleMedium,
-                      ),
-                      Text(
-                        File(path).uri.pathSegments.last,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: theme.textTheme.bodySmall,
-                      ),
-                    ],
-                  ),
-                ),
-
-                IconButton.filledTonal(
-                  onPressed: _togglePlayback,
-                  tooltip: _isPlaying ? 'Pause recording' : 'Play recording',
-                  icon: Icon(_isPlaying ? Icons.pause : Icons.play_arrow),
-                ),
-              ],
-            ),
-
-            Slider(
-              value: progress,
-              onChanged: durationMs > 0 ? _seekPlayback : null,
-            ),
-
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text(_formatDuration(_playbackPosition)),
-                Text(_formatDuration(_recordingDuration)),
-              ],
-            ),
-          ],
         ),
       ),
     );
