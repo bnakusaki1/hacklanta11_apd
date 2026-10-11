@@ -1,6 +1,6 @@
 import 'package:flutter_gemini/flutter_gemini.dart';
 
-const geminiApiKey = "AQ.Ab8RN6LJKJ4JfYbRWjhQeYAClcmyStEMwdHUfFcUtccuMKYf3A";
+const geminiApiKey = String.fromEnvironment('GEMINI_API_KEY');
 
 class GeminiConversationSummarizer {
   static const _model = 'models/gemini-3.8-flash';
