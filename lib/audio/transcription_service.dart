@@ -67,10 +67,6 @@ class TranscriptionService {
 
   Completer<void>? _finalCommitCompleter;
 
-  static const String _backendAccessToken = String.fromEnvironment(
-    'BACKEND_ACCESS_TOKEN',
-  );
-
   final StreamController<String> _transcriptController =
       StreamController<String>.broadcast();
 
@@ -107,17 +103,12 @@ class TranscriptionService {
   }
 
   Future<void> connect() async {
-    if (_backendAccessToken.isEmpty) {
-      throw Exception('BACKEND_ACCESS_TOKEN was not provided to Flutter.');
-    }
-
     _segments.clear();
     _partialTranscript = '';
     _finalCommitCompleter = null;
 
     final channel = IOWebSocketChannel.connect(
-      Uri.parse('ws://127.0.0.1:3000/transcribe'),
-      headers: {'Authorization': 'Bearer $_backendAccessToken'},
+      Uri.parse('wss://hacklanta-apd-backend.onrender.com/transcribe'),
     );
 
     await channel.ready;
