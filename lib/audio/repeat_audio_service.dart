@@ -1,11 +1,20 @@
+import 'dart:async';
 import 'dart:collection';
 import 'dart:math' as math;
-import 'dart:typed_data';
 
 import 'package:audioplayers/audioplayers.dart';
+import 'package:flutter/foundation.dart';
 
 class RepeatAudioService {
-  RepeatAudioService({this.maxBufferSeconds = 20});
+  RepeatAudioService({this.maxBufferSeconds = 20}) {
+    _playerStateSubscription = _player.onPlayerStateChanged.listen((state) {
+      debugPrint('REPEAT PLAYBACK STATE: $state');
+    });
+
+    _playerCompleteSubscription = _player.onPlayerComplete.listen((_) {
+      debugPrint('REPEAT PLAYBACK COMPLETED');
+    });
+  }
 
   final int maxBufferSeconds;
 
@@ -17,8 +26,11 @@ class RepeatAudioService {
 
   final ListQueue<Uint8List> _chunks = ListQueue<Uint8List>();
   final AudioPlayer _player = AudioPlayer();
+  late final StreamSubscription<PlayerState> _playerStateSubscription;
+  late final StreamSubscription<void> _playerCompleteSubscription;
 
   int _bufferedBytes = 0;
+  bool _audioContextConfigured = false;
 
   int get _maxBytes => _bytesPerSecond * maxBufferSeconds;
 
@@ -78,6 +90,24 @@ class RepeatAudioService {
     wav.setRange(0, 44, _wavHeader(pcm.length));
     wav.setRange(44, wav.length, pcm);
 
+    if (!_audioContextConfigured) {
+      await _player.setAudioContext(
+        AudioContext(
+          android: const AudioContextAndroid(
+            audioFocus: AndroidAudioFocus.none,
+            contentType: AndroidContentType.speech,
+            usageType: AndroidUsageType.media,
+            audioMode: AndroidAudioMode.normal,
+          ),
+        ),
+      );
+      _audioContextConfigured = true;
+    }
+
+    debugPrint(
+      'REPEAT PLAYBACK START: requestedSeconds=$seconds | '
+      'pcmBytes=${pcm.length} | audioFocus=none',
+    );
     await _player.stop();
     await _player.play(BytesSource(wav, mimeType: 'audio/wav'));
   }
@@ -90,6 +120,7 @@ class RepeatAudioService {
   }
 
   Future<void> stopRepeat() async {
+    debugPrint('REPEAT PLAYBACK STOP REQUESTED');
     await _player.stop();
   }
 
@@ -128,6 +159,8 @@ class RepeatAudioService {
   }
 
   Future<void> dispose() async {
+    await _playerStateSubscription.cancel();
+    await _playerCompleteSubscription.cancel();
     await _player.dispose();
     clear();
   }

@@ -1,7 +1,7 @@
 import 'dart:io';
 import 'dart:math' as math;
-import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart';
 
@@ -11,6 +11,8 @@ class AudioCaptureService {
   Stream<Uint8List>? _audioStream;
   IOSink? _audioFileSink;
   String? _currentFilePath;
+  int _chunkCount = 0;
+  int _byteCount = 0;
 
   Stream<Uint8List>? get audioStream => _audioStream;
 
@@ -36,16 +38,39 @@ class AudioCaptureService {
       encoder: AudioEncoder.pcm16bits,
       sampleRate: 16000,
       numChannels: 1,
+      audioInterruption: AudioInterruptionMode.none,
+      androidConfig: AndroidRecordConfig(
+        manageBluetooth: false,
+        audioSource: AndroidAudioSource.mic,
+      ),
     );
 
     _audioStream = (await _recorder.startStream(config)).asBroadcastStream();
+    _chunkCount = 0;
+    _byteCount = 0;
+
+    debugPrint(
+      'AUDIO CAPTURE STARTED: PCM16 16 kHz mono | '
+      'interruption handling: none | Android input: phone mic',
+    );
 
     _audioStream!.listen((chunk) {
       _audioFileSink?.add(chunk);
+      _chunkCount++;
+      _byteCount += chunk.length;
+
+      if (_chunkCount == 1 || _chunkCount % 50 == 0) {
+        debugPrint(
+          'AUDIO CAPTURE ACTIVE: chunks=$_chunkCount | bytes=$_byteCount',
+        );
+      }
     });
   }
 
   Future<String?> stopCapture() async {
+    debugPrint(
+      'AUDIO CAPTURE STOP REQUESTED: chunks=$_chunkCount | bytes=$_byteCount',
+    );
     await _recorder.stop();
 
     await _audioFileSink?.flush();

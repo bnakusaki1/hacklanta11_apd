@@ -35,6 +35,7 @@ class _HomePageState extends State<HomePage> {
   StreamSubscription<String>? _partialTranscriptSubscription;
   StreamSubscription<String>? _fullTranscriptSubscription;
   StreamSubscription<TranscriptSegment>? _segmentSubscription;
+  StreamSubscription<void>? _mediaButtonSubscription;
 
   StreamSubscription<PlayerState>? _playerStateSubscription;
   StreamSubscription<Duration>? _positionSubscription;
@@ -74,6 +75,18 @@ class _HomePageState extends State<HomePage> {
   @override
   void initState() {
     super.initState();
+
+    _mediaButtonSubscription = _earphoneService.mediaButtonStream.listen((_) {
+      if (_isListening) {
+        debugPrint(
+          'HEADSET_REPEAT_5_TRIGGERED listening=$_isListening | '
+          'stopping=$_isStopping | repeating=$_isRepeating',
+        );
+        unawaited(_repeatRecentAudio(5));
+      } else {
+        debugPrint('HEADSET_REPEAT_5_IGNORED listening=false');
+      }
+    });
 
     _playerStateSubscription = _audioPlayer.onPlayerStateChanged.listen((
       state,
@@ -158,6 +171,7 @@ class _HomePageState extends State<HomePage> {
           });
 
       await _audioService.startCapture();
+      await _earphoneService.setMediaButtonActive(true);
 
       if (mounted) {
         setState(() {
@@ -224,6 +238,7 @@ class _HomePageState extends State<HomePage> {
       _segmentSubscription = null;
 
       await _transcriptionService.disconnect();
+      await _earphoneService.setMediaButtonActive(false);
 
       if (!mounted) return;
 
@@ -270,6 +285,7 @@ class _HomePageState extends State<HomePage> {
       );
 
       await _transcriptionService.disconnect();
+      await _earphoneService.setMediaButtonActive(false);
 
       await _partialTranscriptSubscription?.cancel();
       _partialTranscriptSubscription = null;
@@ -300,6 +316,8 @@ class _HomePageState extends State<HomePage> {
       try {
         await _transcriptionService.disconnect();
       } catch (_) {}
+
+      await _earphoneService.setMediaButtonActive(false);
 
       if (!mounted) return;
 
@@ -385,6 +403,12 @@ class _HomePageState extends State<HomePage> {
         'text: $recentText',
       );
 
+      debugPrint(
+        'REPEAT PIPELINE BEFORE PLAYBACK: micChunks=$_audioChunksReceived | '
+        'pcmSent=${_transcriptionService.sentChunkCount} | '
+        'socketConnected=${_transcriptionService.isConnected}',
+      );
+
       // ONLY play the audio when earphones are connected.
       if (hasEarphones) {
         debugPrint(
@@ -393,6 +417,12 @@ class _HomePageState extends State<HomePage> {
         );
 
         await _repeatService.repeatRecent(seconds: seconds);
+
+        debugPrint(
+          'REPEAT PIPELINE AFTER START: micChunks=$_audioChunksReceived | '
+          'pcmSent=${_transcriptionService.sentChunkCount} | '
+          'socketConnected=${_transcriptionService.isConnected}',
+        );
       } else {
         debugPrint(
           'REPEAT AUDIO: No earphones detected. '
@@ -483,6 +513,7 @@ class _HomePageState extends State<HomePage> {
     unawaited(_partialTranscriptSubscription?.cancel());
     unawaited(_fullTranscriptSubscription?.cancel());
     unawaited(_segmentSubscription?.cancel());
+    unawaited(_mediaButtonSubscription?.cancel());
 
     unawaited(_playerStateSubscription?.cancel());
     unawaited(_positionSubscription?.cancel());
@@ -493,6 +524,7 @@ class _HomePageState extends State<HomePage> {
     unawaited(_repeatService.dispose());
     unawaited(_audioPlayer.dispose());
     unawaited(_audioService.dispose());
+    unawaited(_earphoneService.dispose());
 
     super.dispose();
   }

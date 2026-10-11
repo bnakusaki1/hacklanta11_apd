@@ -79,6 +79,11 @@ class TranscriptionService {
   final List<TranscriptSegment> _segments = [];
 
   String _partialTranscript = '';
+  bool _isConnected = false;
+  int _sentChunkCount = 0;
+  int _sentByteCount = 0;
+  int _partialCount = 0;
+  int _committedCount = 0;
 
   Stream<String> get transcriptStream => _transcriptController.stream;
 
@@ -91,6 +96,10 @@ class TranscriptionService {
   List<TranscriptSegment> get segments => List.unmodifiable(_segments);
 
   String get partialTranscript => _partialTranscript;
+
+  bool get isConnected => _isConnected;
+
+  int get sentChunkCount => _sentChunkCount;
 
   String get fullTranscript =>
       _segments.map((segment) => segment.text).join(' ').trim();
@@ -106,6 +115,11 @@ class TranscriptionService {
     _segments.clear();
     _partialTranscript = '';
     _finalCommitCompleter = null;
+    _isConnected = false;
+    _sentChunkCount = 0;
+    _sentByteCount = 0;
+    _partialCount = 0;
+    _committedCount = 0;
 
     final channel = IOWebSocketChannel.connect(
       Uri.parse('wss://hacklanta-apd-backend.onrender.com/transcribe'),
@@ -114,6 +128,7 @@ class TranscriptionService {
     await channel.ready;
 
     _channel = channel;
+    _isConnected = true;
 
     _messageSubscription = channel.stream.listen(
       (message) {
@@ -135,16 +150,18 @@ class TranscriptionService {
           final text = data['text']?.toString() ?? '';
 
           if (messageType == 'partial_transcript') {
+            _partialCount++;
             _partialTranscript = text;
 
             _partialTranscriptController.add(text);
 
-            debugPrint('PARTIAL TRANSCRIPT: $text');
+            debugPrint('PARTIAL TRANSCRIPT #$_partialCount: $text');
 
             return;
           }
 
           if (messageType == 'committed_transcript_with_timestamps') {
+            _committedCount++;
             final rawWords = data['words'];
 
             final words = <TranscriptWord>[];
@@ -173,7 +190,7 @@ class TranscriptionService {
               _transcriptController.add(fullTranscript);
 
               debugPrint(
-                'COMMITTED TIMESTAMPED: '
+                'COMMITTED TIMESTAMPED #$_committedCount: '
                 '${segment.start} -> '
                 '${segment.end}: $text',
               );
@@ -222,6 +239,7 @@ class TranscriptionService {
         }
       },
       onError: (error) {
+        _isConnected = false;
         debugPrint('TRANSCRIPTION SOCKET ERROR: $error');
 
         final completer = _finalCommitCompleter;
@@ -231,6 +249,7 @@ class TranscriptionService {
         }
       },
       onDone: () {
+        _isConnected = false;
         debugPrint('TRANSCRIPTION SOCKET CLOSED');
 
         final completer = _finalCommitCompleter;
@@ -245,7 +264,22 @@ class TranscriptionService {
   }
 
   void sendAudio(Uint8List audioChunk) {
-    _channel?.sink.add(audioChunk);
+    final channel = _channel;
+    if (channel == null || !_isConnected) {
+      debugPrint('TRANSCRIPTION SEND SKIPPED: socket is not connected');
+      return;
+    }
+
+    channel.sink.add(audioChunk);
+    _sentChunkCount++;
+    _sentByteCount += audioChunk.length;
+
+    if (_sentChunkCount == 1 || _sentChunkCount % 50 == 0) {
+      debugPrint(
+        'TRANSCRIPTION PCM SENT: chunks=$_sentChunkCount | '
+        'bytes=$_sentByteCount | socketConnected=$_isConnected',
+      );
+    }
   }
 
   /// PUBLIC FUNCTION FOR REPEAT
@@ -367,6 +401,7 @@ class TranscriptionService {
     await _channel?.sink.close();
 
     _channel = null;
+    _isConnected = false;
 
     _finalCommitCompleter = null;
   }
