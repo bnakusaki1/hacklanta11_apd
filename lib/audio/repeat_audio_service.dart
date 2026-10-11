@@ -31,7 +31,6 @@ class RepeatAudioService {
   late final StreamSubscription<void> _playerCompleteSubscription;
 
   int _bufferedBytes = 0;
-  bool _audioContextConfigured = false;
 
   int get _maxBytes => _bytesPerSecond * maxBufferSeconds;
 
@@ -91,19 +90,26 @@ class RepeatAudioService {
     wav.setRange(0, 44, _wavHeader(pcm.length));
     wav.setRange(44, wav.length, pcm);
 
-    if (!_audioContextConfigured) {
-      await _player.setAudioContext(
-        AudioContext(
-          android: const AudioContextAndroid(
-            audioFocus: AndroidAudioFocus.none,
-            contentType: AndroidContentType.speech,
-            usageType: AndroidUsageType.media,
-            audioMode: AndroidAudioMode.normal,
-          ),
+    // Reapply the playback route every time. The recorder can reset the
+    // platform audio session while the mic is active, and a one-time context
+    // setup would then leave rewind audio muted or routed incorrectly.
+    await _player.setAudioContext(
+      AudioContext(
+        android: const AudioContextAndroid(
+          audioFocus: AndroidAudioFocus.gainTransient,
+          contentType: AndroidContentType.speech,
+          usageType: AndroidUsageType.media,
+          audioMode: AndroidAudioMode.normal,
         ),
-      );
-      _audioContextConfigured = true;
-    }
+        iOS: AudioContextIOS(
+          category: AVAudioSessionCategory.playAndRecord,
+          options: const {
+            AVAudioSessionOptions.allowBluetooth,
+            AVAudioSessionOptions.allowBluetoothA2DP,
+          },
+        ),
+      ),
+    );
 
     debugPrint(
       'REPEAT PLAYBACK START: requestedSeconds=$seconds | '

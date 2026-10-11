@@ -1,9 +1,11 @@
 import 'package:flutter_gemini/flutter_gemini.dart';
 
-const geminiApiKey = String.fromEnvironment('GEMINI_API_KEY');
+const geminiApiKey = "AQ.Ab8RN6Ib5GUIcykbUvGIGiNwsmbUey8Rh3XA7uwGPpDh5XnLWg";
 
 class GeminiConversationSummarizer {
-  static const _model = 'models/gemini-3.8-flash';
+  // Flash-Lite is optimized for low-latency, lightweight text tasks like
+  // transcript summaries.
+  static const _model = 'models/gemini-3.5-flash-lite';
 
   bool get isConfigured => geminiApiKey.isNotEmpty;
 
@@ -22,7 +24,7 @@ You are a careful conversation note-taker. Summarize the conversation below in c
 
 Conversation transcript:
 $transcript
-''', maxOutputTokens: 700);
+''', maxOutputTokens: 450);
   }
 
   Future<String> _generate(
@@ -36,7 +38,9 @@ $transcript
     }
 
     Candidates? result;
-    const maxAttempts = 3;
+    // Avoid making users wait through several long retries when the service
+    // is unavailable. A single short retry covers brief network hiccups.
+    const maxAttempts = 2;
 
     for (var attempt = 1; attempt <= maxAttempts; attempt++) {
       try {
@@ -63,7 +67,7 @@ $transcript
           rethrow;
         }
 
-        await Future<void>.delayed(Duration(seconds: attempt));
+        await Future<void>.delayed(const Duration(milliseconds: 350));
       }
     }
 

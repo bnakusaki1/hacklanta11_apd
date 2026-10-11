@@ -644,22 +644,27 @@ class _HomePageState extends State<HomePage> {
                                     _isSummarizingConversation)
                                   const CircularProgressIndicator(),
                                 if (_conversationSummary.isNotEmpty)
-                                  MarkdownBody(
-                                    data: _conversationSummary,
-                                    styleSheet:
-                                        MarkdownStyleSheet.fromTheme(
-                                          Theme.of(context),
-                                        ).copyWith(
-                                          h1: Theme.of(context)
-                                              .textTheme
-                                              .headlineMedium,
-                                          code: const TextStyle(
-                                            fontFamily: 'monospace',
-                                            backgroundColor: Color(0x11000000),
+                                  Padding(
+                                    padding: const EdgeInsets.only(bottom: 100),
+                                    child: MarkdownBody(
+                                      data: _conversationSummary,
+                                      styleSheet:
+                                          MarkdownStyleSheet.fromTheme(
+                                            Theme.of(context),
+                                          ).copyWith(
+                                            h1: Theme.of(context)
+                                                .textTheme
+                                                .headlineMedium,
+                                            code: const TextStyle(
+                                              fontFamily: 'monospace',
+                                              backgroundColor: Color(
+                                                0x11000000,
+                                              ),
+                                            ),
+                                            blockquotePadding:
+                                                const EdgeInsets.all(12),
                                           ),
-                                          blockquotePadding:
-                                              const EdgeInsets.all(12),
-                                        ),
+                                    ),
                                   ),
                               ],
                             ),

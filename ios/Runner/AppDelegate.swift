@@ -6,7 +6,7 @@ import UIKit
 @main
 @objc class AppDelegate: FlutterAppDelegate, FlutterImplicitEngineDelegate {
   private var audioDevicesChannel: FlutterMethodChannel?
-  private var mediaButtonTarget: Any?
+  private var mediaButtonTargets: [(MPRemoteCommand, Any)] = []
 
   override func application(
     _ application: UIApplication,
@@ -52,19 +52,33 @@ import UIKit
   }
 
   private func setMediaButtonActive(_ active: Bool) {
-    let command = MPRemoteCommandCenter.shared().togglePlayPauseCommand
-    command.isEnabled = active
+    let commandCenter = MPRemoteCommandCenter.shared()
+    let commands: [MPRemoteCommand] = [
+      commandCenter.togglePlayPauseCommand,
+      commandCenter.playCommand,
+      commandCenter.pauseCommand,
+    ]
 
-    if active, mediaButtonTarget == nil {
-      mediaButtonTarget = command.addTarget { [weak self] _ in
-        DispatchQueue.main.async {
-          self?.audioDevicesChannel?.invokeMethod("mediaButton", arguments: "headset")
+    commands.forEach { $0.isEnabled = active }
+
+    if active, mediaButtonTargets.isEmpty {
+      for command in commands {
+        let target = command.addTarget { [weak self] _ in
+          DispatchQueue.main.async {
+            self?.audioDevicesChannel?.invokeMethod(
+              "mediaButton",
+              arguments: "headset"
+            )
+          }
+          return .success
         }
-        return .success
+        mediaButtonTargets.append((command, target))
       }
-    } else if !active, let target = mediaButtonTarget {
-      command.removeTarget(target)
-      mediaButtonTarget = nil
+    } else if !active {
+      mediaButtonTargets.forEach { entry in
+        entry.0.removeTarget(entry.1)
+      }
+      mediaButtonTargets.removeAll()
     }
   }
 }

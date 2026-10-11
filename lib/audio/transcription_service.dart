@@ -136,10 +136,25 @@ class TranscriptionService {
     final startSeconds = (currentSeconds - seconds)
         .clamp(0.0, currentSeconds)
         .toDouble();
-    return transcriptForTimeRange(
+    final transcript = transcriptForTimeRange(
       startSeconds: startSeconds,
       endSeconds: currentSeconds,
     );
+    if (transcript.isNotEmpty) return transcript;
+
+    // The transcription service can be a few seconds behind the microphone,
+    // and some committed messages may not include word timestamps. In either
+    // case, still show the latest available transcript instead of claiming
+    // that none exists.
+    final partial = _partialTranscript.trim();
+    if (partial.isNotEmpty) return partial;
+
+    for (final segment in _segments.reversed) {
+      final text = segment.text.trim();
+      if (text.isNotEmpty) return text;
+    }
+
+    return '';
   }
 
   Map<String, dynamic> get group2Payload {

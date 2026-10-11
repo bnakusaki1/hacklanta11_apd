@@ -64,6 +64,8 @@ class MainActivity : FlutterActivity() {
                     if (event != null &&
                         event.action == KeyEvent.ACTION_DOWN &&
                         (event.keyCode == KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE ||
+                            event.keyCode == KeyEvent.KEYCODE_MEDIA_PLAY ||
+                            event.keyCode == KeyEvent.KEYCODE_MEDIA_PAUSE ||
                             event.keyCode == KeyEvent.KEYCODE_HEADSETHOOK)
                     ) {
                         runOnUiThread {
