@@ -95,6 +95,53 @@ class TranscriptionService {
   String get fullTranscript =>
       _segments.map((segment) => segment.text).join(' ').trim();
 
+  /// Returns committed transcript words that overlap the selected recording
+  /// time window. This only reads transcript data; it does not affect the
+  /// active transcription connection.
+  String transcriptForTimeRange({
+    required double startSeconds,
+    required double endSeconds,
+  }) {
+    if (endSeconds <= startSeconds) return '';
+
+    final selectedWords = <String>[];
+    for (final segment in _segments) {
+      for (final word in segment.words) {
+        final wordStart = word.start;
+        final wordEnd = word.end;
+        if (wordStart == null ||
+            wordEnd == null ||
+            wordEnd < startSeconds ||
+            wordStart > endSeconds ||
+            word.text.isEmpty) {
+          continue;
+        }
+        selectedWords.add(word.text);
+      }
+    }
+
+    return selectedWords.join().trim();
+  }
+
+  /// Convenience lookup for the latest 5, 10, or 20 seconds of recording.
+  String transcriptForRecentSeconds({
+    required double currentSeconds,
+    int seconds = 5,
+  }) {
+    if (seconds != 5 && seconds != 10 && seconds != 20) {
+      throw ArgumentError('Repeat duration must be 5, 10, or 20 seconds.');
+    }
+    if (currentSeconds <= 0) return '';
+
+    final startSeconds = (currentSeconds - seconds)
+        .clamp(0.0, currentSeconds)
+        .toDouble();
+    return transcriptForTimeRange(
+      startSeconds: startSeconds,
+      endSeconds: currentSeconds,
+    );
+  }
+
   Map<String, dynamic> get group2Payload {
     return {
       'full_text': fullTranscript,

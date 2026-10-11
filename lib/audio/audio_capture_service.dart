@@ -36,6 +36,11 @@ class AudioCaptureService {
       encoder: AudioEncoder.pcm16bits,
       sampleRate: 16000,
       numChannels: 1,
+      audioInterruption: AudioInterruptionMode.none,
+      androidConfig: AndroidRecordConfig(
+        manageBluetooth: false,
+        audioSource: AndroidAudioSource.mic,
+      ),
     );
 
     _audioStream = (await _recorder.startStream(config)).asBroadcastStream();

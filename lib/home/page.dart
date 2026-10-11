@@ -4,6 +4,8 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:adp/audio/audio_capture_service.dart';
+import 'package:adp/audio/earphone_service.dart';
+import 'package:adp/audio/repeat_audio_service.dart';
 import 'package:adp/audio/transcription_service.dart';
 import 'package:adp/settings/page.dart';
 import 'package:adp/summarization/gemini_conversation_summarizer.dart';
@@ -24,6 +26,10 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> {
   final AudioCaptureService _audioService = AudioCaptureService();
+  final RepeatAudioService _repeatService = RepeatAudioService(
+    maxBufferSeconds: 20,
+  );
+  final EarphoneService _earphoneService = EarphoneService();
   final TranscriptionService _transcriptionService = TranscriptionService();
   final GeminiConversationSummarizer _summarizer =
       GeminiConversationSummarizer();
@@ -34,6 +40,7 @@ class _HomePageState extends State<HomePage> {
   StreamSubscription<String>? _partialTranscriptSubscription;
   StreamSubscription<String>? _fullTranscriptSubscription;
   StreamSubscription<TranscriptSegment>? _segmentSubscription;
+  StreamSubscription<void>? _mediaButtonSubscription;
 
   StreamSubscription<PlayerState>? _playerStateSubscription;
   StreamSubscription<Duration>? _positionSubscription;
@@ -45,6 +52,7 @@ class _HomePageState extends State<HomePage> {
   bool _isStopping = false;
   bool _isSummarizingHighlight = false;
   bool _isSummarizingConversation = false;
+  bool _isRepeating = false;
 
   int _audioChunksReceived = 0;
   int _audioBytesReceived = 0;
@@ -56,6 +64,9 @@ class _HomePageState extends State<HomePage> {
   String _conversationSummary = '';
   String _summaryTitle = 'Conversation summary';
   String? _summaryErrorMessage;
+  String _repeatTranscript = '';
+  int _repeatTranscriptSeconds = 5;
+  bool? _repeatUsedEarphones;
   int _summarySessionId = 0;
   int _summaryRequestId = 0;
 
@@ -64,9 +75,18 @@ class _HomePageState extends State<HomePage> {
   Duration _playbackPosition = Duration.zero;
   Duration _recordingDuration = Duration.zero;
 
+  // Captured PCM is 16 kHz, mono, 16-bit: 32,000 bytes per second.
+  static const double _audioBytesPerSecond = 32000;
+
   @override
   void initState() {
     super.initState();
+
+    _mediaButtonSubscription = _earphoneService.mediaButtonStream.listen((_) {
+      if (_isListening) {
+        unawaited(_repeatRecentAudio(5));
+      }
+    });
 
     _playerStateSubscription = _audioPlayer.onPlayerStateChanged.listen((
       state,
@@ -106,6 +126,8 @@ class _HomePageState extends State<HomePage> {
   Future<void> _startListening() async {
     try {
       await _audioPlayer.stop();
+      await _repeatService.stopRepeat();
+      _repeatService.clear();
 
       _summarySessionId++;
       _summaryRequestId++;
@@ -115,6 +137,10 @@ class _HomePageState extends State<HomePage> {
         _summaryErrorMessage = null;
         _isSummarizingHighlight = false;
         _isSummarizingConversation = false;
+        _repeatTranscript = '';
+        _repeatTranscriptSeconds = 5;
+        _repeatUsedEarphones = null;
+        _isRepeating = false;
       });
 
       // Connect to our backend / ElevenLabs pipeline.
@@ -162,6 +188,7 @@ class _HomePageState extends State<HomePage> {
 
       // Start microphone capture.
       await _audioService.startCapture();
+      await _earphoneService.setMediaButtonActive(true);
 
       if (mounted) {
         setState(() {
@@ -185,6 +212,7 @@ class _HomePageState extends State<HomePage> {
       // Send every microphone chunk to transcription.
       _audioSubscription = _audioService.audioStream?.listen((audioChunk) {
         _transcriptionService.sendAudio(audioChunk);
+        _repeatService.addAudioChunk(audioChunk);
 
         if (!mounted) return;
 
@@ -214,6 +242,7 @@ class _HomePageState extends State<HomePage> {
       _segmentSubscription = null;
 
       await _transcriptionService.disconnect();
+      await _earphoneService.setMediaButtonActive(false);
 
       if (!mounted) return;
 
@@ -238,6 +267,8 @@ class _HomePageState extends State<HomePage> {
     }
 
     try {
+      await _earphoneService.setMediaButtonActive(false);
+
       // Stop sending new microphone chunks first.
       await _audioSubscription?.cancel();
       _audioSubscription = null;
@@ -304,6 +335,7 @@ class _HomePageState extends State<HomePage> {
       try {
         await _transcriptionService.disconnect();
       } catch (_) {}
+      await _earphoneService.setMediaButtonActive(false);
 
       if (!mounted) return;
 
@@ -315,6 +347,46 @@ class _HomePageState extends State<HomePage> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Could not stop listening: $error')),
       );
+    }
+  }
+
+  Future<void> _repeatRecentAudio(int seconds) async {
+    if (!mounted) return;
+    if (!_repeatService.hasAudio || _isRepeating || _isStopping) return;
+    if (seconds != 5 && seconds != 10 && seconds != 20) return;
+
+    setState(() => _isRepeating = true);
+
+    try {
+      final currentSeconds = _audioBytesReceived / _audioBytesPerSecond;
+      final recentTranscript =
+          _transcriptionService.transcriptForRecentSeconds(
+            currentSeconds: currentSeconds,
+            seconds: seconds,
+          );
+      final hasEarphones = await _earphoneService.hasEarphones();
+
+      if (!mounted) return;
+
+      setState(() {
+        _repeatTranscriptSeconds = seconds;
+        _repeatUsedEarphones = hasEarphones;
+        _repeatTranscript = recentTranscript.isEmpty
+            ? 'No committed transcript is available for the last $seconds seconds yet.'
+            : recentTranscript;
+      });
+
+      if (hasEarphones) {
+        await _repeatService.repeatRecent(seconds: seconds);
+      }
+    } catch (error) {
+      debugPrint('REPEAT AUDIO ERROR: $error');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not repeat recent conversation: $error')),
+      );
+    } finally {
+      if (mounted) setState(() => _isRepeating = false);
     }
   }
 
@@ -484,6 +556,7 @@ class _HomePageState extends State<HomePage> {
     unawaited(_partialTranscriptSubscription?.cancel());
     unawaited(_fullTranscriptSubscription?.cancel());
     unawaited(_segmentSubscription?.cancel());
+    unawaited(_mediaButtonSubscription?.cancel());
 
     unawaited(_playerStateSubscription?.cancel());
     unawaited(_positionSubscription?.cancel());
@@ -491,6 +564,8 @@ class _HomePageState extends State<HomePage> {
     unawaited(_completeSubscription?.cancel());
 
     unawaited(_transcriptionService.dispose());
+    unawaited(_repeatService.dispose());
+    unawaited(_earphoneService.dispose());
     unawaited(_audioPlayer.dispose());
     unawaited(_audioService.dispose());
 
@@ -499,6 +574,8 @@ class _HomePageState extends State<HomePage> {
 
   @override
   Widget build(BuildContext context) {
+    final repeatAvailable =
+        _repeatService.hasAudio && !_isRepeating && !_isStopping;
     final label = _isStopping
         ? 'FINISHING...'
         : _isListening
@@ -588,6 +665,41 @@ class _HomePageState extends State<HomePage> {
                   child: SingleChildScrollView(
                     child: Column(
                       children: [
+                        if (_repeatTranscript.isNotEmpty)
+                          Padding(
+                            padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+                            child: Card(
+                              child: Padding(
+                                padding: const EdgeInsets.all(14),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Row(
+                                      children: [
+                                        const Icon(Icons.replay),
+                                        const SizedBox(width: 8),
+                                        Text(
+                                          'Last $_repeatTranscriptSeconds seconds',
+                                          style: Theme.of(context)
+                                              .textTheme
+                                              .titleMedium,
+                                        ),
+                                      ],
+                                    ),
+                                    const SizedBox(height: 8),
+                                    Text(_repeatTranscript),
+                                    const SizedBox(height: 8),
+                                    Text(
+                                      _repeatUsedEarphones == true
+                                          ? 'Audio replayed through connected headphones.'
+                                          : 'No headphones detected — transcript only.',
+                                      style: Theme.of(context).textTheme.bodySmall,
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
                         if (_isSummarizingHighlight ||
                             _isSummarizingConversation ||
                             _conversationSummary.isNotEmpty) ...[
@@ -651,7 +763,7 @@ class _HomePageState extends State<HomePage> {
         ),
       ),
       bottomNavigationBar: BottomAppBar(
-        height: 200,
+        height: 260,
         color: Colors.transparent,
         child: Padding(
           padding: const EdgeInsets.all(8),
@@ -660,6 +772,40 @@ class _HomePageState extends State<HomePage> {
             mainAxisAlignment: MainAxisAlignment.end,
             spacing: 8,
             children: [
+              Text(
+                _isRepeating ? 'Finding recent audio…' : 'Rewind recent audio',
+                style: Theme.of(context).textTheme.labelLarge,
+              ),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: repeatAvailable
+                          ? () => _repeatRecentAudio(5)
+                          : null,
+                      child: const Text('5 sec'),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: repeatAvailable
+                          ? () => _repeatRecentAudio(10)
+                          : null,
+                      child: const Text('10 sec'),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: repeatAvailable
+                          ? () => _repeatRecentAudio(20)
+                          : null,
+                      child: const Text('20 sec'),
+                    ),
+                  ),
+                ],
+              ),
               FilledButton.tonalIcon(
                     style: FilledButton.styleFrom(
                       fixedSize: const Size(double.maxFinite, 60),
