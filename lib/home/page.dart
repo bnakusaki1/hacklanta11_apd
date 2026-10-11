@@ -21,7 +21,11 @@ class _HomePageState extends State<HomePage> {
   final AudioPlayer _audioPlayer = AudioPlayer();
 
   StreamSubscription? _audioSubscription;
-  StreamSubscription<String>? _transcriptSubscription;
+
+  StreamSubscription<String>? _partialTranscriptSubscription;
+  StreamSubscription<String>? _fullTranscriptSubscription;
+  StreamSubscription<TranscriptSegment>? _segmentSubscription;
+
   StreamSubscription<PlayerState>? _playerStateSubscription;
   StreamSubscription<Duration>? _positionSubscription;
   StreamSubscription<Duration?>? _durationSubscription;
@@ -29,12 +33,17 @@ class _HomePageState extends State<HomePage> {
 
   bool _isListening = false;
   bool _isPlaying = false;
+  bool _isStopping = false;
 
   int _audioChunksReceived = 0;
   int _audioBytesReceived = 0;
 
   String? _recordingPath;
-  String _liveTranscript = '';
+
+  String _partialTranscript = '';
+  String _fullTranscript = '';
+
+  final List<TranscriptSegment> _segments = [];
 
   Duration _playbackPosition = Duration.zero;
   Duration _recordingDuration = Duration.zero;
@@ -82,37 +91,72 @@ class _HomePageState extends State<HomePage> {
     try {
       await _audioPlayer.stop();
 
-      // Connect Flutter to our local transcription backend.
+      // Connect to our backend / ElevenLabs pipeline.
       await _transcriptionService.connect();
 
-      // Listen for transcript messages coming back from the backend.
-      _transcriptSubscription = _transcriptionService.transcriptStream.listen((
-        text,
-      ) {
-        debugPrint('LIVE TRANSCRIPT: $text');
+      // LIVE / PARTIAL transcript.
+      _partialTranscriptSubscription = _transcriptionService
+          .partialTranscriptStream
+          .listen((text) {
+            debugPrint('LIVE PARTIAL UI: $text');
 
-        if (!mounted) return;
+            if (!mounted) return;
 
-        setState(() {
-          _liveTranscript = text;
-        });
-      });
+            setState(() {
+              _partialTranscript = text;
+            });
+          });
 
-      // Start the existing microphone capture.
+      // FULL committed transcript.
+      _fullTranscriptSubscription = _transcriptionService.transcriptStream
+          .listen((text) {
+            debugPrint('FULL TRANSCRIPT UI: $text');
+
+            if (!mounted) return;
+
+            setState(() {
+              _fullTranscript = text;
+            });
+          });
+
+      // Timestamped committed segments.
+      _segmentSubscription = _transcriptionService.committedSegmentStream
+          .listen((segment) {
+            debugPrint(
+              'TIMESTAMPED SEGMENT UI: '
+              '${segment.start} -> ${segment.end}: ${segment.text}',
+            );
+
+            if (!mounted) return;
+
+            setState(() {
+              _segments.add(segment);
+            });
+          });
+
+      // Start microphone capture.
       await _audioService.startCapture();
 
       if (mounted) {
         setState(() {
           _recordingPath = null;
-          _liveTranscript = '';
+
+          _partialTranscript = '';
+          _fullTranscript = '';
+          _segments.clear();
+
           _playbackPosition = Duration.zero;
           _recordingDuration = Duration.zero;
+
           _audioChunksReceived = 0;
           _audioBytesReceived = 0;
+
+          _isListening = true;
+          _isStopping = false;
         });
       }
 
-      // Send every microphone chunk to the transcription backend.
+      // Send every microphone chunk to transcription.
       _audioSubscription = _audioService.audioStream?.listen((audioChunk) {
         _transcriptionService.sendAudio(audioChunk);
 
@@ -128,21 +172,29 @@ class _HomePageState extends State<HomePage> {
           '| Total chunks: $_audioChunksReceived',
         );
       });
-
-      if (!mounted) return;
-
-      setState(() {
-        _isListening = true;
-      });
     } catch (error) {
       debugPrint('START LISTENING ERROR: $error');
 
-      await _transcriptSubscription?.cancel();
-      _transcriptSubscription = null;
+      await _audioSubscription?.cancel();
+      _audioSubscription = null;
+
+      await _partialTranscriptSubscription?.cancel();
+      _partialTranscriptSubscription = null;
+
+      await _fullTranscriptSubscription?.cancel();
+      _fullTranscriptSubscription = null;
+
+      await _segmentSubscription?.cancel();
+      _segmentSubscription = null;
 
       await _transcriptionService.disconnect();
 
       if (!mounted) return;
+
+      setState(() {
+        _isListening = false;
+        _isStopping = false;
+      });
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Could not start listening: $error')),
@@ -151,35 +203,82 @@ class _HomePageState extends State<HomePage> {
   }
 
   Future<void> _stopListening() async {
-    await _audioSubscription?.cancel();
-    _audioSubscription = null;
+    if (_isStopping) return;
 
-    await _transcriptSubscription?.cancel();
-    _transcriptSubscription = null;
-
-    await _transcriptionService.disconnect();
+    if (mounted) {
+      setState(() {
+        _isStopping = true;
+      });
+    }
 
     try {
+      // Stop sending new microphone chunks first.
+      await _audioSubscription?.cancel();
+      _audioSubscription = null;
+
+      // IMPORTANT:
+      // Tell the backend to commit the final ElevenLabs segment.
+      // Keep transcript listeners alive while we wait.
+      await _transcriptionService.finishTranscription();
+
+      // Save the audio.
       final savedPath = await _audioService.stopCapture();
 
       debugPrint('AUDIO SAVED LOCALLY: $savedPath');
 
+      debugPrint(
+        'FINAL FULL TRANSCRIPT: '
+        '${_transcriptionService.fullTranscript}',
+      );
+
+      debugPrint(
+        'FINAL GROUP 2 DATA: '
+        '${_transcriptionService.group2Payload}',
+      );
+
+      // Only disconnect AFTER the final committed transcript
+      // has had a chance to arrive.
+      await _transcriptionService.disconnect();
+
+      await _partialTranscriptSubscription?.cancel();
+      _partialTranscriptSubscription = null;
+
+      await _fullTranscriptSubscription?.cancel();
+      _fullTranscriptSubscription = null;
+
+      await _segmentSubscription?.cancel();
+      _segmentSubscription = null;
+
       if (!mounted) return;
 
       setState(() {
         _isListening = false;
+        _isStopping = false;
+
         _recordingPath = savedPath;
+
+        _partialTranscript = '';
+
+        _fullTranscript = _transcriptionService.fullTranscript;
+
         _playbackPosition = Duration.zero;
       });
     } catch (error) {
+      debugPrint('STOP LISTENING ERROR: $error');
+
+      try {
+        await _transcriptionService.disconnect();
+      } catch (_) {}
+
       if (!mounted) return;
 
       setState(() {
         _isListening = false;
+        _isStopping = false;
       });
 
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Could not save recording: $error')),
+        SnackBar(content: Text('Could not stop listening: $error')),
       );
     }
   }
@@ -227,10 +326,30 @@ class _HomePageState extends State<HomePage> {
     return '$minutes:$seconds';
   }
 
+  String _formatTimestamp(double? seconds) {
+    if (seconds == null) {
+      return '--:--';
+    }
+
+    final duration = Duration(milliseconds: (seconds * 1000).round());
+
+    final minutes = duration.inMinutes.toString().padLeft(2, '0');
+
+    final remainingSeconds = (duration.inSeconds % 60).toString().padLeft(
+      2,
+      '0',
+    );
+
+    return '$minutes:$remainingSeconds';
+  }
+
   @override
   void dispose() {
     unawaited(_audioSubscription?.cancel());
-    unawaited(_transcriptSubscription?.cancel());
+
+    unawaited(_partialTranscriptSubscription?.cancel());
+    unawaited(_fullTranscriptSubscription?.cancel());
+    unawaited(_segmentSubscription?.cancel());
 
     unawaited(_playerStateSubscription?.cancel());
     unawaited(_positionSubscription?.cancel());
@@ -270,7 +389,11 @@ class _HomePageState extends State<HomePage> {
                 const SizedBox(height: 20),
 
                 Text(
-                  _isListening ? 'Listening...' : 'Microphone stopped',
+                  _isStopping
+                      ? 'Finishing transcript...'
+                      : _isListening
+                      ? 'Listening...'
+                      : 'Microphone stopped',
                   style: Theme.of(context).textTheme.headlineSmall,
                 ),
 
@@ -282,7 +405,8 @@ class _HomePageState extends State<HomePage> {
 
                 const SizedBox(height: 20),
 
-                if (_liveTranscript.isNotEmpty)
+                // Current live / partial transcript.
+                if (_partialTranscript.isNotEmpty)
                   Card(
                     child: Padding(
                       padding: const EdgeInsets.all(16),
@@ -294,19 +418,76 @@ class _HomePageState extends State<HomePage> {
                             style: Theme.of(context).textTheme.titleMedium,
                           ),
                           const SizedBox(height: 8),
-                          Text(_liveTranscript),
+                          Text(_partialTranscript),
                         ],
                       ),
                     ),
                   ),
 
+                // Full stable transcript.
+                if (_fullTranscript.isNotEmpty) ...[
+                  const SizedBox(height: 16),
+                  Card(
+                    child: Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Full transcript',
+                            style: Theme.of(context).textTheme.titleMedium,
+                          ),
+                          const SizedBox(height: 8),
+                          Text(_fullTranscript),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+
+                // Timestamped committed segments.
+                if (_segments.isNotEmpty) ...[
+                  const SizedBox(height: 16),
+                  Card(
+                    child: Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Timestamped transcript',
+                            style: Theme.of(context).textTheme.titleMedium,
+                          ),
+                          const SizedBox(height: 8),
+                          for (final segment in _segments)
+                            Padding(
+                              padding: const EdgeInsets.only(bottom: 8),
+                              child: Text(
+                                '[${_formatTimestamp(segment.start)}] '
+                                '${segment.text}',
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+
                 const SizedBox(height: 30),
 
                 FilledButton.icon(
-                  onPressed: _isListening ? _stopListening : _startListening,
+                  onPressed: _isStopping
+                      ? null
+                      : _isListening
+                      ? _stopListening
+                      : _startListening,
                   icon: Icon(_isListening ? Icons.stop : Icons.mic),
                   label: Text(
-                    _isListening ? 'STOP LISTENING' : 'START LISTENING',
+                    _isStopping
+                        ? 'FINISHING...'
+                        : _isListening
+                        ? 'STOP LISTENING'
+                        : 'START LISTENING',
                   ),
                 ),
 
@@ -324,6 +505,7 @@ class _HomePageState extends State<HomePage> {
 
   Widget _buildRecordingCard(ThemeData theme) {
     final path = _recordingPath!;
+
     final durationMs = _recordingDuration.inMilliseconds;
 
     final progress = durationMs <= 0
