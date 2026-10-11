@@ -53,11 +53,12 @@ class _HomePageState extends State<HomePage> {
 
   String _partialTranscript = '';
   String _fullTranscript = '';
-  String _highlightSummary = '';
   String _conversationSummary = '';
+  String _summaryTitle = 'Conversation summary';
   String? _summaryErrorMessage;
   int _summarySessionId = 0;
   int _highlightRequestId = 0;
+  int _summaryRequestId = 0;
 
   final List<TranscriptSegment> _segments = [];
 
@@ -109,9 +110,10 @@ class _HomePageState extends State<HomePage> {
 
       _summarySessionId++;
       _highlightRequestId++;
+      _summaryRequestId++;
       setState(() {
-        _highlightSummary = '';
         _conversationSummary = '';
+        _summaryTitle = 'Conversation summary';
         _summaryErrorMessage = null;
         _isSummarizingHighlight = false;
         _isSummarizingConversation = false;
@@ -130,9 +132,13 @@ class _HomePageState extends State<HomePage> {
 
             setState(() {
               _partialTranscript = text;
-              _highlightSummary = '';
+              _conversationSummary = '';
               _highlightRequestId++;
-              _isSummarizingHighlight = false;
+              if (_isSummarizingHighlight) {
+                _summaryRequestId++;
+                _isSummarizingHighlight = false;
+              }
+              _summaryErrorMessage = null;
             });
           });
 
@@ -160,9 +166,12 @@ class _HomePageState extends State<HomePage> {
 
             setState(() {
               _segments.add(segment);
-              _highlightSummary = '';
+              _conversationSummary = '';
               _highlightRequestId++;
-              _isSummarizingHighlight = false;
+              if (_isSummarizingHighlight) {
+                _summaryRequestId++;
+                _isSummarizingHighlight = false;
+              }
               _summaryErrorMessage = null;
             });
           });
@@ -403,33 +412,40 @@ class _HomePageState extends State<HomePage> {
     final contextText = _latestHighlightContext();
     if (contextText.isEmpty || _isSummarizingHighlight) return;
 
+    final summaryTitle = _latestHighlightButtonLabel;
     final sessionId = _summarySessionId;
     final requestId = ++_highlightRequestId;
+    final summaryRequestId = ++_summaryRequestId;
     setState(() {
       _isSummarizingHighlight = true;
+      _isSummarizingConversation = false;
+      _summaryTitle = summaryTitle;
       _summaryErrorMessage = null;
-      _highlightSummary = '';
+      _conversationSummary = '';
     });
 
     try {
       final summary = await _summarizer.summarizeHighlight(contextText);
       if (!mounted ||
           sessionId != _summarySessionId ||
-          requestId != _highlightRequestId) {
+          requestId != _highlightRequestId ||
+          summaryRequestId != _summaryRequestId) {
         return;
       }
-      setState(() => _highlightSummary = summary);
+      setState(() => _conversationSummary = summary);
     } catch (error) {
       if (!mounted ||
           sessionId != _summarySessionId ||
-          requestId != _highlightRequestId) {
+          requestId != _highlightRequestId ||
+          summaryRequestId != _summaryRequestId) {
         return;
       }
       setState(() => _summaryErrorMessage = error.toString());
     } finally {
       if (mounted &&
           sessionId == _summarySessionId &&
-          requestId == _highlightRequestId) {
+          requestId == _highlightRequestId &&
+          summaryRequestId == _summaryRequestId) {
         setState(() => _isSummarizingHighlight = false);
       }
     }
@@ -440,21 +456,34 @@ class _HomePageState extends State<HomePage> {
     int sessionId,
   ) async {
     if (transcript.trim().isEmpty || sessionId != _summarySessionId) return;
+    final summaryRequestId = ++_summaryRequestId;
     setState(() {
+      _isSummarizingHighlight = false;
       _isSummarizingConversation = true;
+      _summaryTitle = 'Conversation summary';
       _summaryErrorMessage = null;
       _conversationSummary = '';
     });
 
     try {
       final summary = await _summarizer.summarizeConversation(transcript);
-      if (!mounted || sessionId != _summarySessionId) return;
+      if (!mounted ||
+          sessionId != _summarySessionId ||
+          summaryRequestId != _summaryRequestId) {
+        return;
+      }
       setState(() => _conversationSummary = summary);
     } catch (error) {
-      if (!mounted || sessionId != _summarySessionId) return;
+      if (!mounted ||
+          sessionId != _summarySessionId ||
+          summaryRequestId != _summaryRequestId) {
+        return;
+      }
       setState(() => _summaryErrorMessage = error.toString());
     } finally {
-      if (mounted && sessionId == _summarySessionId) {
+      if (mounted &&
+          sessionId == _summarySessionId &&
+          summaryRequestId == _summaryRequestId) {
         setState(() => _isSummarizingConversation = false);
       }
     }
@@ -466,23 +495,6 @@ class _HomePageState extends State<HomePage> {
     final seconds = (duration.inSeconds % 60).toString().padLeft(2, '0');
 
     return '$minutes:$seconds';
-  }
-
-  String _formatTimestamp(double? seconds) {
-    if (seconds == null) {
-      return '--:--';
-    }
-
-    final duration = Duration(milliseconds: (seconds * 1000).round());
-
-    final minutes = duration.inMinutes.toString().padLeft(2, '0');
-
-    final remainingSeconds = (duration.inSeconds % 60).toString().padLeft(
-      2,
-      '0',
-    );
-
-    return '$minutes:$remainingSeconds';
   }
 
   @override
@@ -595,7 +607,8 @@ class _HomePageState extends State<HomePage> {
                 child: Container(
                   child: Column(
                     children: [
-                      if (_isSummarizingConversation ||
+                      if (_isSummarizingHighlight ||
+                          _isSummarizingConversation ||
                           _conversationSummary.isNotEmpty) ...[
                         const SizedBox(height: 16),
                         Padding(
@@ -605,15 +618,16 @@ class _HomePageState extends State<HomePage> {
                             // mainAxisAlignment: MainAxisAlignment.center,
                             children: [
                               Text(
-                                'Conversation summary',
+                                _summaryTitle,
                                 style: TextStyle(
                                   fontSize: 18,
                                   fontWeight: FontWeight.bold,
                                 ),
                               ),
                               const SizedBox(height: 8),
-                              if (_isSummarizingConversation)
-                                const LinearProgressIndicator(),
+                              if (_isSummarizingHighlight ||
+                                  _isSummarizingConversation)
+                                const CircularProgressIndicator(),
                               if (_conversationSummary.isNotEmpty)
                                 MarkdownBody(
                                   data: _conversationSummary,
@@ -633,35 +647,10 @@ class _HomePageState extends State<HomePage> {
                                         ),
                                       ),
                                 ),
-                              // Markdown(data: _conversationSummary),
-                              // Text(
-                              //   _conversationSummary,
-                              //   // textAlign: TextAlign.center,
-                              //   style: TextStyle(fontSize: 16, height: 1.5),
-                              // ),
                             ],
                           ),
                         ),
                       ],
-                      if (_segments.isNotEmpty || _partialTranscript.isNotEmpty)
-                        Padding(
-                          padding: const EdgeInsets.all(16),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.stretch,
-                            children: [
-                              Text(
-                                'Latest highlight',
-                                style: Theme.of(context).textTheme.titleMedium,
-                              ),
-                              const SizedBox(height: 8),
-
-                              if (_highlightSummary.isNotEmpty) ...[
-                                const SizedBox(height: 8),
-                                Text(_highlightSummary),
-                              ],
-                            ],
-                          ),
-                        ),
                       if (_summaryErrorMessage != null) ...[
                         const SizedBox(height: 12),
                         Text(
@@ -690,7 +679,6 @@ class _HomePageState extends State<HomePage> {
             mainAxisAlignment: MainAxisAlignment.end,
             spacing: 8,
             children: [
-              // if (_isPlaying)
               FilledButton.tonalIcon(
                     style: FilledButton.styleFrom(
                       fixedSize: const Size(double.maxFinite, 60),
@@ -709,6 +697,7 @@ class _HomePageState extends State<HomePage> {
                       _isSummarizingHighlight
                           ? 'Summarizing…'
                           : _latestHighlightButtonLabel,
+                      style: const TextStyle(fontWeight: FontWeight.bold),
                     ),
                   )
                   .animate(target: _isListening ? 1 : 0)
