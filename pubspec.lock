@@ -137,6 +137,22 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "1.1.2"
+  dio:
+    dependency: transitive
+    description:
+      name: dio
+      sha256: "852ec3b48cc431ac04fff978413c541502b67ffc3e26921e74e3d994694192c1"
+      url: "https://pub.dev"
+    source: hosted
+    version: "5.11.1"
+  dio_web_adapter:
+    dependency: transitive
+    description:
+      name: dio_web_adapter
+      sha256: "3a1b2cd7be71086f38504956e3ebcd2837288d231ff454bafa78021244102bfc"
+      url: "https://pub.dev"
+    source: hosted
+    version: "2.2.2"
   fake_async:
     dependency: transitive
     description:
@@ -153,6 +169,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "2.2.0"
+  figma_squircle:
+    dependency: "direct main"
+    description:
+      name: figma_squircle
+      sha256: "7de45eb9ec66f1c3fea65587d94d66c31e97a9d9068b38bd23d3461aaab5119a"
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.6.3"
   file:
     dependency: transitive
     description:
@@ -174,6 +198,14 @@ packages:
     description: flutter
     source: sdk
     version: "0.0.0"
+  flutter_gemini:
+    dependency: "direct main"
+    description:
+      name: flutter_gemini
+      sha256: b7264b1d19acc4b1a5628a0e26c0976aa1fb948f0d3243bc3510ff51e09476b7
+      url: "https://pub.dev"
+    source: hosted
+    version: "3.0.0"
   flutter_lints:
     dependency: "direct dev"
     description:
@@ -341,6 +373,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "1.18.3"
+  mime:
+    dependency: transitive
+    description:
+      name: mime
+      sha256: bd47de35f07e27267e69c8c8b22edf9473bfee170a60d60fcc93730c5144b7f6
+      url: "https://pub.dev"
+    source: hosted
+    version: "2.1.0"
   objective_c:
     dependency: transitive
     description:
@@ -562,6 +602,14 @@ packages:
     description: flutter
     source: sdk
     version: "0.0.0"
+  smooth_page_indicator:
+    dependency: "direct main"
+    description:
+      name: smooth_page_indicator
+      sha256: ab2253be8d65ed7a341a43fe62d5cfba404b5969c23bc998964fe5aa8aae465c
+      url: "https://pub.dev"
+    source: hosted
+    version: "3.0.0"
   source_span:
     dependency: transitive
     description:

@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:adp/audio/audio_capture_service.dart';
 import 'package:adp/audio/transcription_service.dart';
 import 'package:adp/settings/page.dart';
+import 'package:adp/summarization/gemini_conversation_summarizer.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/material.dart';
 import 'package:iconsax/iconsax.dart';
@@ -18,6 +19,8 @@ class HomePage extends StatefulWidget {
 class _HomePageState extends State<HomePage> {
   final AudioCaptureService _audioService = AudioCaptureService();
   final TranscriptionService _transcriptionService = TranscriptionService();
+  final GeminiConversationSummarizer _summarizer =
+      GeminiConversationSummarizer();
   final AudioPlayer _audioPlayer = AudioPlayer();
 
   StreamSubscription? _audioSubscription;
@@ -34,6 +37,8 @@ class _HomePageState extends State<HomePage> {
   bool _isListening = false;
   bool _isPlaying = false;
   bool _isStopping = false;
+  bool _isSummarizingHighlight = false;
+  bool _isSummarizingConversation = false;
 
   int _audioChunksReceived = 0;
   int _audioBytesReceived = 0;
@@ -42,6 +47,11 @@ class _HomePageState extends State<HomePage> {
 
   String _partialTranscript = '';
   String _fullTranscript = '';
+  String _highlightSummary = '';
+  String _conversationSummary = '';
+  String? _summaryErrorMessage;
+  int _summarySessionId = 0;
+  int _highlightRequestId = 0;
 
   final List<TranscriptSegment> _segments = [];
 
@@ -91,6 +101,16 @@ class _HomePageState extends State<HomePage> {
     try {
       await _audioPlayer.stop();
 
+      _summarySessionId++;
+      _highlightRequestId++;
+      setState(() {
+        _highlightSummary = '';
+        _conversationSummary = '';
+        _summaryErrorMessage = null;
+        _isSummarizingHighlight = false;
+        _isSummarizingConversation = false;
+      });
+
       // Connect to our backend / ElevenLabs pipeline.
       await _transcriptionService.connect();
 
@@ -104,6 +124,9 @@ class _HomePageState extends State<HomePage> {
 
             setState(() {
               _partialTranscript = text;
+              _highlightSummary = '';
+              _highlightRequestId++;
+              _isSummarizingHighlight = false;
             });
           });
 
@@ -131,6 +154,10 @@ class _HomePageState extends State<HomePage> {
 
             setState(() {
               _segments.add(segment);
+              _highlightSummary = '';
+              _highlightRequestId++;
+              _isSummarizingHighlight = false;
+              _summaryErrorMessage = null;
             });
           });
 
@@ -249,6 +276,9 @@ class _HomePageState extends State<HomePage> {
       await _segmentSubscription?.cancel();
       _segmentSubscription = null;
 
+      final finalTranscript = _transcriptionService.fullTranscript;
+      final summarySessionId = _summarySessionId;
+
       if (!mounted) return;
 
       setState(() {
@@ -263,6 +293,12 @@ class _HomePageState extends State<HomePage> {
 
         _playbackPosition = Duration.zero;
       });
+
+      if (finalTranscript.isNotEmpty) {
+        unawaited(
+          _generateConversationSummary(finalTranscript, summarySessionId),
+        );
+      }
     } catch (error) {
       debugPrint('STOP LISTENING ERROR: $error');
 
@@ -316,6 +352,106 @@ class _HomePageState extends State<HomePage> {
     await _audioPlayer.seek(
       Duration(milliseconds: (durationMs * value).round()),
     );
+  }
+
+  String get _latestHighlightButtonLabel {
+    final latestText = _partialTranscript.trim().isNotEmpty
+        ? _partialTranscript.trim()
+        : (_segments.isNotEmpty ? _segments.last.text.trim() : '');
+    final normalized = latestText.toLowerCase();
+
+    if (normalized.contains('?') ||
+        RegExp(
+          r'^(what|why|how|who|when|where|which|is|are|am|do|does|did|can|could|would|will|should|have|has|had)\b',
+        ).hasMatch(normalized) ||
+        normalized.contains('asked a question')) {
+      return 'What was the question?';
+    }
+    if (RegExp(r'\b(decided|agreed|settled on|going with)\b')
+        .hasMatch(normalized)) {
+      return 'What was decided?';
+    }
+    if (RegExp(r'\b(next step|action item|follow up|we need to|i will)\b')
+        .hasMatch(normalized)) {
+      return 'What are the next steps?';
+    }
+    return 'Summarize the latest highlight';
+  }
+
+  String _latestHighlightContext() {
+    final recentSegments = _segments.length <= 5
+        ? _segments
+        : _segments.sublist(_segments.length - 5);
+    final lines = recentSegments
+        .map((segment) => segment.text.trim())
+        .where((text) => text.isNotEmpty)
+        .toList();
+    final partial = _partialTranscript.trim();
+    if (partial.isNotEmpty && (lines.isEmpty || lines.last != partial)) {
+      lines.add(partial);
+    }
+    return lines.join('\n');
+  }
+
+  Future<void> _summarizeLatestHighlight() async {
+    final contextText = _latestHighlightContext();
+    if (contextText.isEmpty || _isSummarizingHighlight) return;
+
+    final sessionId = _summarySessionId;
+    final requestId = ++_highlightRequestId;
+    setState(() {
+      _isSummarizingHighlight = true;
+      _summaryErrorMessage = null;
+      _highlightSummary = '';
+    });
+
+    try {
+      final summary = await _summarizer.summarizeHighlight(contextText);
+      if (!mounted ||
+          sessionId != _summarySessionId ||
+          requestId != _highlightRequestId) {
+        return;
+      }
+      setState(() => _highlightSummary = summary);
+    } catch (error) {
+      if (!mounted ||
+          sessionId != _summarySessionId ||
+          requestId != _highlightRequestId) {
+        return;
+      }
+      setState(() => _summaryErrorMessage = error.toString());
+    } finally {
+      if (mounted &&
+          sessionId == _summarySessionId &&
+          requestId == _highlightRequestId) {
+        setState(() => _isSummarizingHighlight = false);
+      }
+    }
+  }
+
+  Future<void> _generateConversationSummary(
+    String transcript,
+    int sessionId,
+  ) async {
+    if (transcript.trim().isEmpty || sessionId != _summarySessionId) return;
+    setState(() {
+      _isSummarizingConversation = true;
+      _summaryErrorMessage = null;
+      _conversationSummary = '';
+    });
+
+    try {
+      final summary = await _summarizer.summarizeConversation(transcript);
+      if (!mounted || sessionId != _summarySessionId) return;
+      setState(() => _conversationSummary = summary);
+    } catch (error) {
+      if (!mounted || sessionId != _summarySessionId) return;
+      setState(() => _summaryErrorMessage = error.toString());
+    } finally {
+      if (mounted && sessionId == _summarySessionId) {
+        setState(() => _isSummarizingConversation = false);
+      }
+    }
   }
 
   String _formatDuration(Duration duration) {
@@ -404,6 +540,82 @@ class _HomePageState extends State<HomePage> {
                 Text('Audio bytes received: $_audioBytesReceived'),
 
                 const SizedBox(height: 20),
+
+                if (_segments.isNotEmpty || _partialTranscript.isNotEmpty)
+                  Card(
+                    child: Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          Text(
+                            'Latest highlight',
+                            style: Theme.of(context).textTheme.titleMedium,
+                          ),
+                          const SizedBox(height: 8),
+                          FilledButton.tonalIcon(
+                            onPressed:
+                                _isSummarizingHighlight ||
+                                    _isSummarizingConversation
+                                ? null
+                                : _summarizeLatestHighlight,
+                            icon: _isSummarizingHighlight
+                                ? const SizedBox.square(
+                                    dimension: 18,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                    ),
+                                  )
+                                : const Icon(Icons.auto_awesome),
+                            label: Text(
+                              _isSummarizingHighlight
+                                  ? 'Summarizing…'
+                                  : _latestHighlightButtonLabel,
+                            ),
+                          ),
+                          if (_highlightSummary.isNotEmpty) ...[
+                            const SizedBox(height: 8),
+                            Text(_highlightSummary),
+                          ],
+                        ],
+                      ),
+                    ),
+                  ),
+
+                if (_isSummarizingConversation ||
+                    _conversationSummary.isNotEmpty) ...[
+                  const SizedBox(height: 16),
+                  Card(
+                    child: Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Conversation summary',
+                            style: Theme.of(context).textTheme.titleMedium,
+                          ),
+                          const SizedBox(height: 8),
+                          if (_isSummarizingConversation)
+                            const LinearProgressIndicator(),
+                          if (_conversationSummary.isNotEmpty)
+                            Text(_conversationSummary),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+
+                if (_summaryErrorMessage != null) ...[
+                  const SizedBox(height: 12),
+                  Text(
+                    _summaryErrorMessage!,
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.error,
+                    ),
+                  ),
+                ],
 
                 // Current live / partial transcript.
                 if (_partialTranscript.isNotEmpty)
